@@ -1,0 +1,13 @@
+name = "BitStructs"
+uuid = "986c44fd-7890-4f8b-839b-7630dd9da80b"
+authors = ["Robert Rudolph"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
