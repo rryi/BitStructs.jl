@@ -156,7 +156,7 @@ ps = PS(nv)
 show(ps)
 
 b1(str::PS)= str.i16
-b2(str::PS)= getpropertyV2(str, :i16)
+#b2(str::PS)= getpropertyV2(str, :i16)
 b3(str::PS)= getpropertyV3(str, Val(:i16))
 b4(str::PS)= getpropertyV4(str, Val(:i16))
 @btime (b1($ps))

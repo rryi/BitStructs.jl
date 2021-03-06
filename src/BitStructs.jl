@@ -194,11 +194,12 @@ end
 extract field descriptor (type,shift,bits) from type info for a symbol S.
 If S is not found, (Nothing,0,0) is returned.
 
-This function is slow, even with multiple dispatch. It is used at
+This function is slow, even with multiple dispatch. It is replaced at
 compile time by @bstruct which generates specialized fast methods, 
+returning a constant
 """
 
-function _fielddescr(::Type{BStruct{T}},s::Symbol) where T<:NamedTuple
+function _fielddescr(::Type{BStruct{T}},::Val{s}) where {T<:NamedTuple, s}
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -215,8 +216,8 @@ function _fielddescr(::Type{BStruct{T}},s::Symbol) where T<:NamedTuple
     throw(ArgumentError(s))
 end
 
-@inline function getproperty(x::BStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BStruct{T},s)
+@inline function Base.getproperty(x::BStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescr(BStruct{T},Val(s))
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
