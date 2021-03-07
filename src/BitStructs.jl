@@ -159,17 +159,18 @@ _convert(::Type{type},v::UInt64)            where type<:Enum    = type(v-typemin
 # conversions from external property type to bitfield
 
 """
-_convert(::Type{UInt64}, bits, x::T)
+_convert(::Type{UInt64}, x::T)
 
 This function basically inverts _convert(::Type{T},ps::UInt64).
 
-Convert from a value of type T to a bitfield in a BStruct, with bounds check (does result fit in *bits* bits)
+Convert from a value of type T to a bitfield in a BStruct, with bounds check on the number of bits.
+Bitfield means return value must be an UInt64 (does result fit in *bits* bits)
 parameter bits is necessary with respect to BStruct fields declared as BUInt{N} or BInt{N} in an BStruct: T is an
 ordinary UInt or Int in these cases, with bitsizeof(T)!=bits. 
 
 _convert assures that returned value is in 0:_mask(bits).
 """
-_convert(::Type{UInt64},bits, v::T)         where T             = _convert(UInt64,bits,convert(UInt64,v)) # default
+_convert(::Type{UInt64}, v::T)         where T             = _convert(UInt64,bitsizeof(T),convert(UInt64,v)) # default
 
 @inline function _convert(::Type{UInt64},bits,v::T) where T<:Unsigned   
     @boundscheck v > _mask(bits) && throw(BoundsError(v))
@@ -425,7 +426,111 @@ end
 end
 =#
 
+"""
+@bstruct name begin key1::Type1; key2::Type2; ...; end
 
+This macro defines a BStruct and performance-optimized methods for BStruct field access.
+Syntax is similar to [`@NamedTuple`](@ref)
 
+Its first expression must be an identifier, it becomes the
+type name (alias) of the generated BStruct type. 
 
+Its first expression is a sequence of identifier :: type declarations,
+identifier becomes a field name in the BStruct, and type its type.
+
+type must be an isbits data type. Parameterized data types are allowed. 
+Included is support for all predefined primitive number types up to 32 bit
+sizes, Bool (consuming 1 bit) and Enum subtypes (bit size automatically derived).
+
+For Integer subranges, the types BInt{N} and BUInt{N} are given, which declare 
+a field as Int or  UInt for a subrange consuming N bits in the BStruct instance.
+
+Other types are accepted, but need some support: the following methods should be 
+implemented for a type T to be supported in a @bstruct defined bit struct:
+    
+    * BitStructs.bitsizeof(T). Number of bits to store a value of type T in
+      a BStruct instance. If no specific method is defined, 8*sizeof(T)
+      is used as a default - probably a waste of bits.
+
+    * BitStructs._convert(::Type{UInt64},x::T) returning the bitfield 
+      value to store in a BStruct instance representing x. returned value
+      must be a UInt64 in the range 0:(1<<bitsizeof(T)-1). 
+      If no specific method is defined, Base.convert is called with the same parameters.
+
+    * BitStructs._convert(::Type{T}, x::UInt64) returning an instance of t
+      constructed from a bitfield of bitsizeof(T) bits given in x. If no
+      specific method is defined, Base.convert is called with the same parameters.
+
+Before @bstruct ist called, all used types and their bitsizeof method must be defined.
+
+The sum of bit sizes of all fields must be smaller or equal to 64, because a BStruct instance is 
+a 64 bit primitive type (is checked by the macro).
+
+Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
+resembling the usual struct syntax.
+
+The following example just fits into 64 bit. An ordinary struct would consume 19 bytes, 
+more than doubling memory consumption. Concerning its runtime performance, have a look at the
+benchmarks supplied as test functions.
+
+```jldoctest
+julia> @bstruct MyBitStruct begin
+    flag1 :: Bool
+    flag2 :: Bool
+    flag3 :: Bool
+    flag4 :: Bool
+    ascii1 :: BUInt{7}
+    ascii2 :: BUInt{7}
+    id1 :: BUInt{9} # 0..511
+    id2 :: BUInt{12} # 0..4095
+    delta1 :: BInt{9} # -256..255
+    delta1 :: BInt{9} # -256..255 
+    flag5 :: Bool
+    flag6 :: Bool
+    flag7 :: Bool
+    flag8 :: Bool
+    status:: BUInt(3) # 0..7
+end
+
+```
+
+"""
+macro bstruct()
+    """
+    @NamedTuple{key1::Type1, key2::Type2, ...}
+    @NamedTuple begin key1::Type1; key2::Type2; ...; end
+
+This macro gives a more convenient syntax for declaring `NamedTuple` types. It returns a `NamedTuple`
+type with the given keys and types, equivalent to `NamedTuple{(:key1, :key2, ...), Tuple{Type1,Type2,...}}`.
+If the `::Type` declaration is omitted, it is taken to be `Any`.   The `begin ... end` form allows the
+declarations to be split across multiple lines (similar to a `struct` declaration), but is otherwise
+equivalent.
+
+For example, the tuple `(a=3.1, b="hello")` has a type `NamedTuple{(:a, :b),Tuple{Float64,String}}`, which
+can also be declared via `@NamedTuple` as:
+
+```jldoctest
+julia> @NamedTuple{a::Float64, b::String}
+NamedTuple{(:a, :b), Tuple{Float64, String}}
+
+julia> @NamedTuple begin
+           a::Float64
+           b::String
+       end
+NamedTuple{(:a, :b), Tuple{Float64, String}}
+```
+
+!!! compat "Julia 1.5"
+    This macro is available as of Julia 1.5.
+"""
+macro NamedTuple(ex)
+    Meta.isexpr(ex, :braces) || Meta.isexpr(ex, :block) ||
+        throw(ArgumentError("@NamedTuple expects {...} or begin...end"))
+    decls = filter(e -> !(e isa LineNumberNode), ex.args)
+    all(e -> e isa Symbol || Meta.isexpr(e, :(::)), decls) ||
+        throw(ArgumentError("@NamedTuple must contain a sequence of name or name::type expressions"))
+    vars = [QuoteNode(e isa Symbol ? e : e.args[1]) for e in decls]
+    types = [esc(e isa Symbol ? :Any : e.args[2]) for e in decls]
+    return :(NamedTuple{($(vars...),), Tuple{$(types...)}})
+end
 end # module
