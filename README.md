@@ -1,6 +1,6 @@
 # BitStructs.jl
 
-Julia struct-s packed at bit boundaries into a primitive type.
+Julia struct-s packed at bit boundaries into a primitive 64 bit type.
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://rryi.github.io/PackedStructs.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://rryi.github.io/PackedStructs.jl/dev)
@@ -9,13 +9,15 @@ Julia struct-s packed at bit boundaries into a primitive type.
 [![Build Status](https://api.cirrus-ci.com/github/rryi/PackedStructs.jl.svg)](https://cirrus-ci.com/github/rryi/PackedStructs.jl)
 [![Coverage](https://codecov.io/gh/rryi/PackedStructs.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/rryi/PackedStructs.jl)
 
-BitStructs has two use cases in mind: 
+BitStructs has the following use cases in mind: 
 
- * memory reduction for large tables with fields having very few instances like flags, status info, enumerations. A couple of columns in such tables could be combined into a Vector{PStruct[T}}
+ * memory reduction for tables with fields having very few instances like flags, status info, enumerations. A couple of columns in such tables could be combined into a Vector{T<:BitStruct}
  
- * pooling of several method parameters in one PStruct instance, which fits into one machine register variable. This reduces push/pop overheads in method execution and allows to keep more data in registers, improving runtime performance.
+ * pooling of several method parameters in one BitStruct instance. This reduces push/pop overhead in method execution for methods which are not inlined, and can improve runtime performance, because the compiler gets more choices for keeping data in CPU registers.
 
- # current state: in development, systematic testing to be done.
+ * reading and writing of bitpacked binary data 
 
- Basic type BStruct is defined, and has working constructors, getters and setters. However actual performance is unsatisfactory. First benchmarks indicate, that the design of bitfields within a machine word variable allows similar performance as conventional struct-s for field access, but current implementation suffers from type reflection overhead. Next develomnent target is to eliminate all reflection overhead at runtime.
+ # current state: in development
 
+ As soon as I think the package is usable, I will make it a registered julia package.
+ 

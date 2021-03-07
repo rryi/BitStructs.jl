@@ -2,68 +2,54 @@ module BitStructs
 #
 #include("bittypes.jl")
 
-#include "(bstruct.jl")
+#include "(BitStruct.jl")
 
 """
-BStruct ist the central type of package BitStructs.
+BitStruct ist the central type of package BitStructs.
 
-A BStruct is a primitive 64-bit type which supports properties 
+A BitStruct is a primitive 64-bit type which supports properties 
 similar to a (immutable) julia struct type.
 
-Type structure is defined by a NamedTuple; for convenience,
-a macro @struct is supplied which comes syntactically close
-to a struct declaration.
-
 In contrast to a julia struct, its fields are aligned at 
-bit boundaries, not byte boundaries in the BStruct container. 
-The biggest memory gain is achieved for boolean values and Enum-s 
+bit boundaries in the BitStruct container, which reduces
+memory consumption for suitable field types at a very small price 
+(a >>> and a & on an UInt64 value). The biggest memory gain is 
+achieved for Bool fields (factor 8), very boolean values and Enum-s
 with a few instances. 
 
-This package adds Integer subtypes BInt{N} 
-and BUInt{N} with N bits, which have a value range of 0:1<<N-1 
-respective -1<<(N-1):1<<(N-1)-1. These types are singleton types
-for BStruct declarations of Int and UInt fields with restricted
-value ranges.
-
-Other types T can be used in BStruct provided that the following 
-methods are implemented
-
- * reininterpret(UInt64,v:T) 
-
- * bitsizeof(T) # defaults to 8*sizeof(T))
-
- * _convert(::Type{UInt64}, bits, x::T)
-
- * _convert(::Type{T}, x::UInt64)
- 
+BitStruct subtypes should always be defined using macro
+[`@bitstruct`](@ref), which comes syntactically close
+to a usual julia struct declaration. The macro generates
+performance-optimized methods for field access, a BitStruct
+subtype is not usable without that. 
 """
-primitive type BStruct{T<:NamedTuple} 64 end
+primitive type BitStruct{T<:NamedTuple} 64 end
 
 
 """
-Type to be used in BStruct field declarations, only.
+Type to be used in BitStruct field declarations, only.
 
 It declares an UInt field using N bits, with a value range 
 0:1<<N-1. A read access to such a field returns an UInt.
 
-When storing a value to the field in a BStruct constructor or by [`set`](@ref),
+When storing a value to the field in a BitStruct constructor or by [`set`](@ref),
 a value range check is performed as @boundscheck.
 """
 struct BUInt{N} end
 
 """
-Type to be used in BStruct field declarations, only.
+Type to be used in BitStruct field declarations, only.
 
 It declares an Int field using N bits, with a value range 
 -1<<(N-1):1<<(N-1)-1. A read access to such a field returns an Int.
 
-When storing a value to the field in a BStruct constructor or by [`set`](@ref),
+When storing a value to the field in a BitStruct constructor or by [`set`](@ref),
 a value range check is performed as @boundscheck.
 """
 struct BInt{N} end
 
 
-export BStruct, BInt, BUInt, bitsizeof
+export BitStruct, BInt, BUInt, bitsizeof
 
 
 """
@@ -79,8 +65,8 @@ bitsizeof(::Type{BUInt{N}}) where N = N
 bitsizeof(::Type{Bool}) = 1
 @Base.pure bitsizeof(::Type{T}) where T<: Enum = 8*sizeof(Int) - leading_zeros(Int(typemax(T))-Int(typemin(T)))
 
-Base.fieldnames(::Type{BStruct{T}}) where T = T.parameters[1]
-Base.propertynames(ps::BStruct{T}) where T = fieldnames(BStruct{T})
+Base.fieldnames(::Type{BitStruct{T}}) where T = T.parameters[1]
+Base.propertynames(ps::BitStruct{T}) where T = fieldnames(BitStruct{T})
 
 # NTuple{N, Any} is supertype of all tuples of length NamedTuple!!
 # tuple_len(::NTuple{N, Any}) where {N} = Val{N}()
@@ -113,7 +99,7 @@ set a bitfield in a packed struct.
 If pstruct and value are interpreted as bit vector, it performs pstruct[shift+1:shift+bits] = value[1..bits]
 
 Boundscheck tests if only the lowest *bits* bits are set in value. 
-This is guaranteed by _convert(UInt64,bits,...).
+This is guaranteed by encode,bits,...).
 """
 @inline function _set(pstruct::UInt64,::Val{shift},::Val{bits}, value::UInt64) where {shift, bits}
     v = value & _mask(bits)
@@ -131,76 +117,101 @@ end
     return pstruct
 end
 
-
+function checkbitsize(v::UInt64,bits) 
+    v< 1<<bits || throw("value has more than $bits bits: $v"outside allowed range of $bits" ArgumentError(string(v))")
+end
 
 """
-_convert(::Type{type}, x::UInt64)
+decode(::Type{T}, x::UInt64)
 
-convert a bitfield x from a BStruct to a value of Type *type*.
+convert a bitfield x from a BitStruct to a value of Type T.
 
-This function is intentionally different from Base.convert, for two reasons:
+This function is intentionally different from Base.convert, for several reasons:
 
   * type flags like BInt{N} are used as conversion target, but the returned value 
   is of a different type (Int). This breaks the usual contract of Base.convert.
   
-  * a value to convert from is technically an UInt64, but semantically it is something packed into a bitfield from a BStruct,
-  and _convert may apply transformations to use less bits. An important example is Enum: there is a Base.convert(Enum,v::Int),
-  and it differs substantially from _convert(Enum,v::UInt) it the Enum has negative instances. 
+  * the value to convert from is declared as an UInt64, but in BitStruct semantics it is 
+    a BUInt{bitsizeof(T)}, a bitfield from a BitStruct, with bitsizeof(T) significant bits.
+  
+  * there may be a Base.convert method with the same parameters doing something different.
+  Example: Base.convert(Float16,UInt64(2)) will return Float16(2.0), decode(Float16,UInt64(2)) will return
+  reinterpret(Float16,UInt16(2)).  
+  
+Important precondition, implemented as @boundscheck: v < 1<<bitsizeof(T). 
 """
-_convert(::Type{type},v::UInt64)            where type          = convert(type,v)   # generic default implementation
-_convert(::Type{UInt64},v::UInt64)                              = v                 # to avoid ambiguity
+@inline function decode(::Type{T},v::UInt64) where T
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    convert(T,v)   # generic default implementation
+end
 
 # specific conversions
-_convert(::Type{type},v::UInt64)            where type<:BUInt   = v
-_convert(::Type{BInt{bits}},v::UInt64)      where bits          = (v%Int64)<<(64-bits)>>(64-bits)
-_convert(::Type{type},v::UInt64)            where type<:Signed  = (v%Int64)<<(64-bitsizeof(type))>>(64-bitsizeof(type))
-_convert(::Type{type},v::UInt64)            where type<:Enum    = type(v-typemin(type))
+@inline function decode(::Type{T},v::UInt64) where T<:BUInt
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    v
+end
+@inline function decode(::Type{T},v::UInt64) where T<:Unsigned 
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    v % T
+end
+@inline function decode(::Type{BInt{bits}},v::UInt64) where bits
+    @boundscheck checkbitsize(v,bits)
+    (v%Int64)<<(64-bits)>>(64-bits) # sign extension
+end
+@inline function decode(::Type{T},v::UInt64) where T<:Signed
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    (v%Int64)<<(64-bitsizeof(T))>>(64-bitsizeof(T))
+end
+@inline function decode(::Type{T},v::UInt64) where T<:Enum
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    T(v-typemin(T))
+end
+
 
 # conversions from external property type to bitfield
 
 """
-_convert(::Type{UInt64}, x::T)
+encode(v::T)
 
-This function basically inverts _convert(::Type{T},ps::UInt64).
-
-Convert from a value of type T to a bitfield in a BStruct, with bounds check on the number of bits.
-Bitfield means return value must be an UInt64 (does result fit in *bits* bits)
-parameter bits is necessary with respect to BStruct fields declared as BUInt{N} or BInt{N} in an BStruct: T is an
-ordinary UInt or Int in these cases, with bitsizeof(T)!=bits. 
-
-_convert assures that returned value is in 0:_mask(bits).
+Convert a value of type T to a bitfield with bitsizeof(T) bits.
+Bitfield is technically an UInt64 with a restricted range 0:(1<<bits)-1.
 """
-_convert(::Type{UInt64}, v::T)         where T             = _convert(UInt64,bitsizeof(T),convert(UInt64,v)) # default
+@inline encode(v::T) where T<:Union{Signed,Unsigned} = encode(bitsizeof(T),v) 
 
-@inline function _convert(::Type{UInt64},bits,v::T) where T<:Unsigned   
-    @boundscheck v > _mask(bits) && throw(BoundsError(v))
+@inline function encode(bits,v::T) where T<:Unsigned   
+    @boundscheck checkbitsize(v,bits)
     return v % UInt64
 end
 
-@inline function _convert(::Type{UInt64},bits,v::T) where T<:Signed     
+@inline function encode(bits,v::T) where T<:Signed     
     @boundscheck ( v < -1<<(bits-1) || v>= 1<<(bits-1) ) &&  throw(BoundsError(v))
     return (v % UInt64)&_mask(bits)
 end
 
-@inline function _convert(::Type{UInt64},bits,v::T) where T<:Enum     
+
+@inline function encode(v::T) where T<:Enum     
     u = (Int(v)+Int(typemin(T)))%UInt64
-    @boundscheck u > _mask(bits)  &&  throw(BoundsError(v))
+    @boundscheck checkbitsize(u,bitssizeof(T))
     return u % UInt64
+end
+    
+@inline function encode(v::Bool)
+    return v%UInt64
 end
     
 
 """
-    function _fielddescr(::Type{BStruct{T}},s::Symbol)
+    function _fielddescr(::Type{BitStruct{T}},s::Symbol)
 
 extract field descriptor (type,shift,bits) from type info for a symbol S.
 If S is not found, (Nothing,0,0) is returned.
 
 This function is slow, even with multiple dispatch. It is replaced at
-compile time by @bstruct which generates specialized fast methods, 
+compile time by @BitStruct which generates specialized fast methods, 
 returning a constant
 """
 
-function _fielddescr(::Type{BStruct{T}},::Val{s}) where {T<:NamedTuple, s}
+function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple, s}
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -217,8 +228,8 @@ function _fielddescr(::Type{BStruct{T}},::Val{s}) where {T<:NamedTuple, s}
     throw(ArgumentError(s))
 end
 
-@inline function Base.getproperty(x::BStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BStruct{T},Val(s))
+@inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
@@ -226,7 +237,7 @@ end
 
 the fastest variant known so far without @generated or @macro
 
-@inline function _fielddescr5(::Type{BStruct{T}},s::Symbol) where T <: NamedTuple
+@inline function _fielddescr5(::Type{BitStruct{T}},s::Symbol) where T <: NamedTuple
     _fielddescr5(Tuple{T.parameters[1]...}, T.parameters[2],s,0)
 end
 
@@ -239,7 +250,7 @@ end
     _fielddescr5(Base.tuple_type_tail(syms),Base.tuple_type_tail(types),s,shift+bitsizeof(type))
 end
 
-@inline function getpropertyV5(x::BStruct{T},s::Symbol) where T<:NamedTuple
+@inline function getpropertyV5(x::BitStruct{T},s::Symbol) where T<:NamedTuple
     type,shift,bits = _fielddescr5(PStruct{T},s)
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
@@ -248,7 +259,7 @@ export getpropertyV5
 
 
 
-Base.@pure function Base.getproperty(x::BStruct{T},s::Symbol) where T<:NamedTuple
+Base.@pure function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
     @inbounds begin
         shift = 0
         types = T.parameters[2].parameters
@@ -270,8 +281,8 @@ end
 
 
 # better than getproperty but still slow
-@inline Base.@pure function getpropertyV2(x::BStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BStruct{T},Val(s))
+@inline Base.@pure function getpropertyV2(x::BitStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 export getpropertyV2
@@ -281,13 +292,13 @@ export getpropertyV2
 
 # first try: constructor setting some fields. TODO redesign using helper methods
 "constructor setting some fields, fields not included in nt stay 0"
-function BStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
+function BitStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
     ret = zero(UInt64)
     syms = NT.parameters[1]
     idx = 1
     while idx <= length(syms)
         s = syms[idx]
-        t,shift, bits = _fielddescr(BStruct{T},Val(s))
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
         local v::UInt64
         if t <: Union{BUInt,Unsigned} 
             v = UInt64(nt[idx])
@@ -305,17 +316,17 @@ function BStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
         ret |= (v<<shift)
         idx += 1
     end
-    return reinterpret(BStruct{T},ret)
+    return reinterpret(BitStruct{T},ret)
 end
 
 
-function Base.show(x::BStruct{T}) where T<:NamedTuple
+function Base.show(x::BitStruct{T}) where T<:NamedTuple
     ps = reinterpret(UInt64,x)
-    println(BStruct{T}, ' ',repr(ps))
+    println(BitStruct{T}, ' ',repr(ps))
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
     for s in syms
-        t,shift, bits = _fielddescr(BStruct{T},Val(s))
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
         println("  ",s, "::",t, " = ",repr(_convert(t,_get(ps,shift,bits))))
     end
     println("end")
@@ -323,22 +334,21 @@ end
 
 
 """
-    set(ps::BStruct{T};kwargs...)
+    set(ps::BitStruct{T};kwargs...)
 
 replace a selection of fields given by named parameters.
-parameter names in args must match properties of ps, 
-and there must be a method _convert(UInt64,bits,v) for any value v in kwargs.
+parameter names in args must match properties of ps
 """
-function set(x::BStruct{T};kwargs...) where {T<:NamedTuple}
+function set(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in kwargs
         s = p.first
-        t,shift, bits = _fielddescr(BStruct{T},Val(s))
-        v = _convert(UInt64,bits,p.second)
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+        v = encode(p.second)
         ret = _set(Val(shift),Val(bits),ret,v)
         ret |= (v<<shift)
     end
-    return reinterpret(BStruct{T},ret)
+    return reinterpret(BitStruct{T},ret)
 end
 
 
@@ -355,7 +365,7 @@ end
 
 
 #= WIP - plz ignore
-Base.@pure function _fielddescrV3(::Type{BStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+Base.@pure function _fielddescrV3(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -378,8 +388,8 @@ Base.@pure function _fielddescrV3(::Type{BStruct{T}},::Val{s}) where {T<:NamedTu
 end
 
 
-@inline Base.@pure function getpropertyV3(x::BStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescrV3(BStruct{T},Val(s))
+@inline Base.@pure function getpropertyV3(x::BitStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescrV3(BitStruct{T},Val(s))
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 export getpropertyV3
@@ -396,7 +406,7 @@ Base.@pure function _descrkernel(::Type{T},s::Symbol) where T <: NTuple{N,Dataty
                 return Int(ccall(:jl_field_index, Cint, (Any, Any, Cint), T, name, err)+1)
             end
 
-Base.@pure function _fielddescrV2(::Type{BStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+Base.@pure function _fielddescrV2(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
     shift = 0
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
@@ -420,50 +430,50 @@ end
 
 
 # compiler does not 
-@inline Base.@pure function getpropertyV3(x::BStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescrV3(BStruct{T},Val(s))
+@inline Base.@pure function getpropertyV3(x::BitStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescrV3(BitStruct{T},Val(s))
     return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 =#
 
 """
-@bstruct name begin key1::Type1; key2::Type2; ...; end
+@BitStruct name begin key1::Type1; key2::Type2; ...; end
 
-This macro defines a BStruct and performance-optimized methods for BStruct field access.
+This macro defines a BitStruct and performance-optimized methods for BitStruct field access.
 Syntax is similar to [`@NamedTuple`](@ref)
 
 Its first expression must be an identifier, it becomes the
-type name (alias) of the generated BStruct type. 
+type name (alias) of the generated BitStruct type. 
 
 Its first expression is a sequence of identifier :: type declarations,
-identifier becomes a field name in the BStruct, and type its type.
+identifier becomes a field name in the BitStruct, and type its type.
 
 type must be an isbits data type. Parameterized data types are allowed. 
 Included is support for all predefined primitive number types up to 32 bit
 sizes, Bool (consuming 1 bit) and Enum subtypes (bit size automatically derived).
 
 For Integer subranges, the types BInt{N} and BUInt{N} are given, which declare 
-a field as Int or  UInt for a subrange consuming N bits in the BStruct instance.
+a field as Int or  UInt for a subrange consuming N bits in the BitStruct instance.
 
 Other types are accepted, but need some support: the following methods should be 
-implemented for a type T to be supported in a @bstruct defined bit struct:
+implemented for a type T to be supported in a @BitStruct defined bit struct:
     
     * BitStructs.bitsizeof(T). Number of bits to store a value of type T in
-      a BStruct instance. If no specific method is defined, 8*sizeof(T)
+      a BitStruct instance. If no specific method is defined, 8*sizeof(T)
       is used as a default - probably a waste of bits.
 
-    * BitStructs._convert(::Type{UInt64},x::T) returning the bitfield 
-      value to store in a BStruct instance representing x. returned value
+    * BitStructs.encode(x::T) returning the bitfield 
+      value to store in a BitStruct instance representing x. returned value
       must be a UInt64 in the range 0:(1<<bitsizeof(T)-1). 
       If no specific method is defined, Base.convert is called with the same parameters.
 
-    * BitStructs._convert(::Type{T}, x::UInt64) returning an instance of t
+    * BitStructs.decode(::Type{T}, x::UInt64) returning an instance of t
       constructed from a bitfield of bitsizeof(T) bits given in x. If no
       specific method is defined, Base.convert is called with the same parameters.
 
-Before @bstruct ist called, all used types and their bitsizeof method must be defined.
+Before @BitStruct ist called, all used types and their bitsizeof method must be defined.
 
-The sum of bit sizes of all fields must be smaller or equal to 64, because a BStruct instance is 
+The sum of bit sizes of all fields must be smaller or equal to 64, because a BitStruct instance is 
 a 64 bit primitive type (is checked by the macro).
 
 Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
@@ -474,7 +484,7 @@ more than doubling memory consumption. Concerning its runtime performance, have 
 benchmarks supplied as test functions.
 
 ```jldoctest
-julia> @bstruct MyBitStruct begin
+julia> @BitStruct MyBitStruct begin
     flag1 :: Bool
     flag2 :: Bool
     flag3 :: Bool
@@ -495,7 +505,7 @@ end
 ```
 
 """
-macro bstruct()
+macro BitStruct()
     """
     @NamedTuple{key1::Type1, key2::Type2, ...}
     @NamedTuple begin key1::Type1; key2::Type2; ...; end
