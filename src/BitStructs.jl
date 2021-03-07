@@ -437,26 +437,30 @@ end
 =#
 
 """
-@BitStruct name begin key1::Type1; key2::Type2; ...; end
+    @BitStruct name begin key1::Type1; key2::Type2; ...; end
+ or @BitStruct name {key1::Type1, key2::Type2, ...}
 
-This macro defines a BitStruct and performance-optimized methods for BitStruct field access.
-Syntax is similar to [`@NamedTuple`](@ref)
+ This macro defines a BitStruct and performance-optimized methods for BitStruct field access.
+Syntax is that of [`@NamedTuple`](@ref), except the leading name
 
-Its first expression must be an identifier, it becomes the
-type name (alias) of the generated BitStruct type. 
+name is an identifier, it is a type alias for the constructed BitStruct type. 
 
-Its first expression is a sequence of identifier :: type declarations,
+Its first ex follows a sequence of identifier :: type declarations,
 identifier becomes a field name in the BitStruct, and type its type.
 
 type must be an isbits data type. Parameterized data types are allowed. 
 Included is support for all predefined primitive number types up to 32 bit
 sizes, Bool (consuming 1 bit) and Enum subtypes (bit size automatically derived).
 
-For Integer subranges, the types BInt{N} and BUInt{N} are given, which declare 
-a field as Int or  UInt for a subrange consuming N bits in the BitStruct instance.
+For Integer subranges, the types BInt{N} and BUInt{N} are defined in BitStructs 
+package, they are used as type markers within BitStruct definitions, only.
+Technically, they are singleton typesmarker types which declare 
+a field as Int or UInt with a subrange consuming N bits in the BitStruct instance.
+A field declared as BInt{N} / BUInt{N]} is read and written as Int/UInt, 
+with a range restriction to N significant bits.
 
-Other types are accepted, but need some support: the following methods should be 
-implemented for a type T to be supported in a @BitStruct defined bit struct:
+Other types are accepted, but need some support: the following methods have to be 
+implemented for a type T to be supported in a BitStruct:
     
     * BitStructs.bitsizeof(T). Number of bits to store a value of type T in
       a BitStruct instance. If no specific method is defined, 8*sizeof(T)
@@ -467,14 +471,13 @@ implemented for a type T to be supported in a @BitStruct defined bit struct:
       must be a UInt64 in the range 0:(1<<bitsizeof(T)-1). 
       If no specific method is defined, Base.convert is called with the same parameters.
 
-    * BitStructs.decode(::Type{T}, x::UInt64) returning an instance of t
-      constructed from a bitfield of bitsizeof(T) bits given in x. If no
-      specific method is defined, Base.convert is called with the same parameters.
+    * BitStructs.decode(::Type{T}, x::UInt64) returning an instance of T
+      constructed from a bitfield of bitsizeof(T) bits given in x.
 
-Before @BitStruct ist called, all used types and their bitsizeof method must be defined.
+All types and their bitsizeof method must be defined if @BitStruct is called.
 
-The sum of bit sizes of all fields must be smaller or equal to 64, because a BitStruct instance is 
-a 64 bit primitive type (is checked by the macro).
+The sum of bit sizes of all fields must be smaller or equal to 64, because a BitStruct 
+instance is implemented as a 64 bit primitive type (is checked by the macro).
 
 Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
 resembling the usual struct syntax.
@@ -505,42 +508,20 @@ end
 ```
 
 """
-macro BitStruct()
-    """
-    @NamedTuple{key1::Type1, key2::Type2, ...}
-    @NamedTuple begin key1::Type1; key2::Type2; ...; end
-
-This macro gives a more convenient syntax for declaring `NamedTuple` types. It returns a `NamedTuple`
-type with the given keys and types, equivalent to `NamedTuple{(:key1, :key2, ...), Tuple{Type1,Type2,...}}`.
-If the `::Type` declaration is omitted, it is taken to be `Any`.   The `begin ... end` form allows the
-declarations to be split across multiple lines (similar to a `struct` declaration), but is otherwise
-equivalent.
-
-For example, the tuple `(a=3.1, b="hello")` has a type `NamedTuple{(:a, :b),Tuple{Float64,String}}`, which
-can also be declared via `@NamedTuple` as:
-
-```jldoctest
-julia> @NamedTuple{a::Float64, b::String}
-NamedTuple{(:a, :b), Tuple{Float64, String}}
-
-julia> @NamedTuple begin
-           a::Float64
-           b::String
-       end
-NamedTuple{(:a, :b), Tuple{Float64, String}}
-```
-
-!!! compat "Julia 1.5"
-    This macro is available as of Julia 1.5.
-"""
-macro NamedTuple(ex)
+macro bitstruct(name,ex)
     Meta.isexpr(ex, :braces) || Meta.isexpr(ex, :block) ||
-        throw(ArgumentError("@NamedTuple expects {...} or begin...end"))
+        throw(ArgumentError("@bitstruct expects name {...} or name begin...end"))
+    
     decls = filter(e -> !(e isa LineNumberNode), ex.args)
     all(e -> e isa Symbol || Meta.isexpr(e, :(::)), decls) ||
-        throw(ArgumentError("@NamedTuple must contain a sequence of name or name::type expressions"))
+        throw(ArgumentError("@NamedTuple must contain a sequence of name::type expressions"))
     vars = [QuoteNode(e isa Symbol ? e : e.args[1]) for e in decls]
     types = [esc(e isa Symbol ? :Any : e.args[2]) for e in decls]
-    return :(NamedTuple{($(vars...),), Tuple{$(types...)}})
+    # build the expressions to execute
+    bitstruct = :(BitStruct{NamedTuple{($(vars...),), Tuple{$(types...)}}})
 end
+
+
+
+
 end # module

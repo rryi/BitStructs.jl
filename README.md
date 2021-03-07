@@ -19,5 +19,5 @@ BitStructs has the following use cases in mind:
 
  # current state: in development
 
- As soon as I think the package is usable, I will make it a registered julia package.
+ As soon as I think the package is usable, it will become a registered julia package.
  
