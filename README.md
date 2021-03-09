@@ -21,3 +21,28 @@ BitStructs has the following use cases in mind:
 
  As soon as I think the package is usable, it will become a registered julia package.
  
+
+ # syntax
+
+ # reading a BitStruct field
+
+ # writing a BitStruct field
+
+Well, BitStruct is an immutable type. Literally writing a field is not possible.
+But we can construct a new BitStruct having a field replaced. To have a neat short syntax,
+the division operator is overloaded: left side is a BitStruct, right side a Typle{Symbol,T} 
+where T is the type of the BitStruct field. An Example:
+
+
+    @bitstruct BS begin
+    i1 :: BInt{6}
+    u1 :: UInt8
+    end
+
+    bs = BS(i1=3,u1=0x02)
+
+    bs = bs / (:u1,0x17) # replaces field :u1 value by 0x17
+
+    bs /= :i1,5  # assigns 5 to bitfield :i1
+
+TODO: support |= &= as well? NO 

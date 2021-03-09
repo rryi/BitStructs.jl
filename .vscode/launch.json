@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "type": "julia",
+            "request": "launch",
+            "name": "Launch Julia tests",
+            "program": "${workspaceFolder}/test/runtests.jl",
+            "stopOnEntry": true
+        },
+    {
+        "type": "julia",
+        "request": "launch",
+        "name": "Launch Program",
+        "program": "${workspaceFolder}/Program",
+        "stopOnEntry": false
+    }
+    ]
+}

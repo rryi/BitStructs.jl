@@ -45,53 +45,6 @@ function bench(vec)
     sum
 end
 
-
-# not used
-function benchV2(vec::Vector{PS}) where PS <: BitStruct
-    sum = 0
-    for ps in vec
-        sum += getpropertyV2(ps, :i1) +getpropertyV2(ps, :i2) +getpropertyV2(ps, :u16) +getpropertyV2(ps, :i16)
-    end
-    sum
-end
-
-
-
-# _fielddescr call replaced in getpropertiesV2 by ins result, for type PS
-import BitStructs: _get, _convert
-
-function getpropertyV3(ps, ::Val{:i1})
-    type,shift,bits = BUInt{6},2,6 # _fielddescr(BitStruct{T},Val(s))
-    return _convert(type,_get(reinterpret(UInt64,ps),shift,bits))    
-end
-
-function getpropertyV3(ps, ::Val{:i2})
-    type,shift,bits = BInt{8},8,8 # _fielddescr(BitStruct{T},Val(s))
-    return _convert(type,_get(reinterpret(UInt64,ps),shift,bits))    
-end
-
-function getpropertyV3(ps, ::Val{:u16})
-    type,shift,bits = UInt16,32,16 # _fielddescr(BitStruct{T},Val(s))
-    return _convert(type,_get(reinterpret(UInt64,ps),shift,bits))    
-end
-
-function getpropertyV3(ps, ::Val{:i16})
-    type,shift,bits = Int16,48,16 # _fielddescr(BitStruct{T},Val(s))
-    return _convert(type,_get(reinterpret(UInt64,ps),shift,bits))    
-end
-
-
-function benchV3(vec::Vector{PS}) where PS <: BitStruct
-    sum = 0
-    for ps in vec
-        sum += getpropertyV3(ps, Val(:i1)) +getpropertyV3(ps, Val(:i2)) +getpropertyV3(ps, Val(:u16)) +getpropertyV3(ps, Val(:i16))
-    end
-    sum
-end
-
-
-
-
 # hand-coded bare metal for type PS: drilldown to elementary shift, and operation, omitting final type conversion
 function getpropertyV4(ps, ::Val{:i1})
     reinterpret(UInt64,ps)>>2 & 0x3F
@@ -134,11 +87,7 @@ println("@btime bench(sv): some work on an ordinary struct, in a loop on a Vecto
 println("@btime bench(psv): same work on BitStruct having same fields as struct in preceding benchmark")
 @btime bench($psv)
 
-#println("@btime benchV2(psv): same work, but using getpropertyV2 instead of getproperty for BitStruct field access")
-#@btime benchV2($psv)
 
-println("@btime benchV3(psv): same work, but handcoded getpropertyV3 replacing _fielddescr call by its result (simulated constant propagation)")
-@btime benchV3($psv)
 
 println("@btime benchV4(psv): same work, but handcoded getpropertyV4 with resulting SHIFT and AND operation")
 @btime benchV4($psv)
