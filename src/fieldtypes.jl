@@ -110,7 +110,7 @@ This function is intentionally different from Base.convert, for several reasons:
   
 Important precondition, implemented as @boundscheck: v < 1<<bitsizeof(T). 
 """
-@inline function decode(::Type{T},v::UInt64) where T
+@inline function decode(::Type{T},v::UInt64) where T <: Bool
     @boundscheck checkbitsize(v,bitsizeof(T))
     convert(T,v)   # generic default implementation
 end
@@ -145,49 +145,69 @@ end
 # conversions from external property type to bitfield
 
 """
-encode(v::T)
+encode(::Type{T}, v::V)
 
-Convert a value of type T to a bitfield with bitsizeof(T) bits.
-Bitfield is technically an UInt64 with a restricted range 0:(1<<bits)-1.
+Convert a value of type V to a bitfield value for a BitStruct
+field declared as type T. A bitfield in the BitStruct context
+is technically an UInt64 with a value below 1<<bitsizeof(T).
+
+encode and decode are in some sense inverse functions. Lets look
+at a BitStruct field declared as T. With encode(T,v), we compute the
+BitStruct-internal representation as a bitfield of bitsizeof(T) bits.
+With decode(T,u::UInt) we reconstruct its representation for
+processing outside of BitStruct. Its data type is defined by the
+return value of decode, let-s call it R.
+
+In simple cases like Bool we have T===R===V. 
+
+If T is a singleton type, only used to define a field of a
+BitStruct, like BInt{N} or AsciiChar, R and V always differ from T,
+but in most cases, we have still R===V.
+
+To allow for type-relaxed assignments to BitStruct fields, you
+can define encode on several "similar" types, we arrive at R<:V.
 
 encode and decode are mutually inverse functions for valid arguments.
-for a v::T with a supported type T must hold: decode(T,encode(v))==v
-
-For a bitfield u which is convertable to an instance of T must hold:
-encode(decode(T,u)) == u
+for v=Decode(T,u) the following must hold: *encode(T,v)==u* and
+also *decode(T,encode(T,v)==v*. 
+For other values v, the relation *decode(T,encode(T,v))==v* is not
+granted. This is the case if encode accepts arguments of "similar"
+types, or encode already does a projection, like in the case of type
+Sign in tutorial.jl. For similar types with suitable convert and 
+promote rules the relation usually holds.
 """
-@inline encode(v::T) where T = encode(v,bitsizeof(T)) 
-
-@inline function encode(v::T,bits) where T<:Unsigned   
-    @boundscheck checkbitsize(v,bits)
+@inline function encode(::Type{T}, v::V) where {T<:Union{Unsigned,BUInt}, V<:Unsigned}  
+    @boundscheck checkbitsize(v,bitsizeof(T))
     return v % UInt64
 end
 
-@inline function encode(v::T,bits) where T<:Signed     
-    @boundscheck ( v < -1<<(bits-1) || v>= 1<<(bits-1) ) &&  throw(DomainError(v,"out of range for BInt{$bits}"))
+@inline function encode(::Type{T}, v::V) where {T<:Union{Signed,BInt}, V<:Integer}
+    bits = bitsizeof(T)
+    @boundscheck ( v < -1<<(bits-1) || v>= 1<<(bits-1) ) &&  throw(DomainError(v,"out of range for bitfield $T"))
     return (v % UInt64)&_mask(bits)
 end
 
 
-@inline function encode(v::T,bits) where T<:Enum     
+@inline function encode(::Type{T}, v::T) where {T<:Enum}     
     u = (Int(v)+Int(typemin(T)))%UInt64
-    @boundscheck checkbitsize(u,bits)
+    @boundscheck checkbitsize(u,bitsizeof(T))
     return u
 end
     
-@inline function encode(v::Bool,bits)
+@inline function encode(::Type{T}, v::T) where {T<:Bool}   
     return v%UInt64
 end
 
-@inline function encode(v::Float16,bits)
-    return reinterpret(UInt16,v)%UInt64
+@inline function encode(::Type{T}, v::V) where {T<:Float16, V<:Real}
+    return reinterpret(UInt16,T(v))%UInt64
 end
 
-@inline function encode(v::Float32,bits)
-    return reinterpret(UInt32,v)%UInt64
+@inline function encode(::Type{T}, v::V) where {T<:Float32, V<:Real}
+    return reinterpret(UInt32,T(v))%UInt64
 end
+
    
-@inline function encode(v::Char,bits)
+@inline function encode(::Type{T}, v::V) where {T<:Union{Char,AsciiChar,Latin1Char, V<:Char}
     u = UInt64(v)
     @boundscheck checkbitsize(u,bits)
     return u

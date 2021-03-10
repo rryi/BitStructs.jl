@@ -69,17 +69,14 @@ BitStructs.decode(::Type{Strange},u::UInt64) = (u==zero(UInt64) ? BIGMINUS : Str
 println("bits used by Strange with custom encoding:", bitsizeof(Strange))
 
 # To encode a small subset of an existing type efficiently, 
-# define a wrapper struct with a custom encoding. Example:
+# define a singleton type and a custom encoding. Example:
 # consider you want to store a sign of a (real) number.
 # It should have the values -1.0 and 1.0,
 # so that you can apply the sign by a multiplication.
-struct Sign 
-    value::Float64 
-    Sign(v::Number) = v>=0 ? new(1.0) : new(-1.0)
-end
+struct Sign end
 BitStructs.bitsizeof(::Type{Sign}) = 1
-BitStructs.encode(v::Sign) = (v.value>0 ? zero(UInt64) : one(UInt64))
-BitStructs.decode(::Type{Sign},u::UInt64) = (u==zero(UInt64) ? Sign(-1.0) : Sign(1.0))
+BitStructs.encode(::Type{Sign},v::Float64) = (v.value>0 ? zero(UInt64) : one(UInt64))
+BitStructs.decode(::Type{Sign},u::UInt64) = (u==zero(UInt64) ? 1.0 : -1.0)
 
 
 

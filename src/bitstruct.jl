@@ -132,7 +132,7 @@ replace field s in ps by v.
 function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     t,shift, bits = _fielddescr(BitStruct{T},s)
-    u = encode(v, bits)
+    u = encode(t,v)
     ret = _set(ret,Val(shift),Val(bits),u)
     return reinterpret(BitStruct{T},ret)
 end
@@ -158,7 +158,7 @@ function set(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     for p in pairs(kwargs)
         s = p.first
         t,shift, bits = _fielddescr(BitStruct{T},s)
-        v = encode(p.second, bits)
+        v = encode(t,p.second)
         ret = _set(ret,Val(shift),Val(bits),v)
     end
     return reinterpret(BitStruct{T},ret)
@@ -174,7 +174,7 @@ function set2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     while idx <= length(syms)
         s = syms[idx]
         t,shift, bits = _fielddescr(BitStruct{T},s)
-        v = encode(nt[idx], bits)
+        v = encode(t,nt[idx])
         ret = _set(ret,Val(shift),Val(bits),v)
     end
     return reinterpret(BitStruct{T},ret)
@@ -241,41 +241,50 @@ end
  This macro defines a BitStruct and performance-optimized methods for BitStruct field access.
 Syntax is that of [`@NamedTuple`](@ref), except the leading name
 
-name is an identifier, it is a type alias for the constructed BitStruct type. 
+name is an identifier, it becomes a constant to be used as type alias 
+for the constructed BitStruct type. 
 
-Its first ex follows a sequence of identifier :: type declarations,
-identifier becomes a field name in the BitStruct, and type its type.
+It follows a block with a sequence of ident::type declarations,
+ident is the field name in the BitStruct, and type its declared
+type.
 
 type must be an isbits data type. Parameterized data types are allowed. 
 Included is support for all predefined primitive number types up to 32 bit
-sizes, Bool (consuming 1 bit) and Enum subtypes (bit size automatically derived).
+sizes, Bool (consuming 1 bit), Enum subtypes (bit size automatically derived),
+and Char.
 
-For Integer subranges, the types BInt{N} and BUInt{N} are defined in BitStructs 
-package, they are used as type markers within BitStruct definitions, only.
-Technically, they are singleton typesmarker types which declare 
-a field as Int or UInt with a subrange consuming N bits in the BitStruct instance.
-A field declared as BInt{N} / BUInt{N]} is read and written as Int/UInt, 
-with a range restriction to N significant bits.
+For BitStruct-s memory efficiency it is essential, that field definitions
+can restrict the set of instances of a Type R to a small subset, which can 
+be encoded with less bits. For this purpose, special singleton types
+are introduced. Each such singleton type represents an encoding/decoding
+scheme for an instance subset. You can define several types T1, T2 ...
+identifying distinct subrange encodings of a type R.
 
-Other types are accepted, but need some support: the following methods have to be 
-implemented for a type T to be supported in a BitStruct:
+For Integer subranges, the singleton types BInt{N} and BUInt{N} are defined in 
+BitStructs package. BInt{N} declares an Int subrange of N bits, BUInt{n} an
+UInt subrange. For Characters, the frequently used subranges of ASCII and Latin-1
+characters are supported witn AsciiChar and LatinChar, consuming 7/8 bits in a
+BitStruct.
+
+It is easy to define support for further types and subranges of them
+in BitStruct fields. The following methods have to be 
+implemented for values of type R to be stored in a BitStruct bitfield
+declared as type T: 
     
-    * BitStructs.bitsizeof(T). Number of bits to store a value of type T in
-      a BitStruct instance. If no specific method is defined, 8*sizeof(T)
-      is used as a default - probably a waste of bits.
+    * BitStructs.bitsizeof(::Type{T}). Number of bits to store a value of 
+      type R in BitStruct field declared as type T.
 
-    * BitStructs.encode(x::T) returning the bitfield 
-      value to store in a BitStruct instance representing x. returned value
+    * BitStructs.encode(::Type{T},x::R).  Compute the bitfield 
+      value representing x, to store in a BitStruct instance. Returned value
       must be a UInt64 in the range 0:(1<<bitsizeof(T)-1). 
-      If no specific method is defined, Base.convert is called with the same parameters.
 
-    * BitStructs.decode(::Type{T}, x::UInt64) returning an instance of T
+    * BitStructs.decode(::Type{T}, x::UInt64)::R. Returns an instance of R
       constructed from a bitfield of bitsizeof(T) bits given in x.
 
-All types and their bitsizeof method must be defined if @BitStruct is called.
+All types must be already defined when @bitstruct is called. 
 
 The sum of bit sizes of all fields must be smaller or equal to 64, because a BitStruct 
-instance is implemented as a 64 bit primitive type (is checked by the macro).
+instance is implemented as a 64 bit primitive type.
 
 Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
 resembling the usual struct syntax.
