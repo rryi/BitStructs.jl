@@ -11,22 +11,16 @@ In contrast to a julia struct, its fields are aligned at
 bit boundaries in the BitStruct container, which reduces
 memory consumption for suitable field types at a very small price 
 (a >>> and a & on an UInt64 value). The biggest memory gain is 
-achieved for Bool fields (factor 8), very boolean values and Enum-s
-with a few instances. 
+achieved for Bool fields (factor 8), Enum-s with a few instances
+and 
 
 BitStruct subtypes should always be defined using macro
 [`@bitstruct`](@ref), which comes syntactically close
-to a usual julia struct declaration. The macro generates
-performance-optimized methods for field access, a BitStruct
-subtype is not usable without that. 
+to a usual julia struct declaration. It does essential checks
+on the valitdity of BitStruct type - it is easy to define
+a NamedTuple Type which leads to an invalid BitStruct. 
 """
 primitive type BitStruct{T<:NamedTuple} 64 end
-
-
-
-
-export BitStruct, BInt, BUInt, bitsizeof
-
 
 
 Base.fieldnames(::Type{BitStruct{T}}) where T = T.parameters[1]
@@ -190,13 +184,23 @@ end
 
 
 ## constructors
-BitStruct{T}() where {T<:NamedTuple} = reinterpret(BitStruct{T},zero(UInt64))
 
+#BitStruct{T}() where {T<:NamedTuple} = reinterpret(BitStruct{T},zero(UInt64))
+
+# struct-alike constructor
+function BitStruct{T}(args...) where T <:NamedTuple
+    ret = reinterpret(BitStruct{T},zero(UInt64))
+    syms = T.parameters[1]
+    for (i,v) in enumerate(args)
+        ret /= (syms[i],v)
+    end
+    return ret
+end
 
 # this is more specific than BitStruct{T}() ==> stack overflow. why??!
-function BitStruct{T}(;kwargs...) where {T<:NamedTuple}
-    set(reinterpret(BitStruct{T},zero(UInt64));kwargs...)
-end
+#function BitStruct{T}(;kwargs...) where {T<:NamedTuple}
+#    set(reinterpret(BitStruct{T},zero(UInt64));kwargs...)
+#end
 
         
 # first try: constructor setting some fields. TODO redesign using helper methods
@@ -316,15 +320,92 @@ macro bitstruct(name,ex)
     bitstruct = :(BitStruct{NamedTuple{($(vars...),), Tuple{$(types...)}}})
     #println("type is: ",bitstruct) 
     # so far adopted from @NamedTuples. Now: build fielddescr table
+    #= not necessary because _fielddescr is not optimized.
+    # and not working: loop fails on a type declared after this macro but before macro call: eval(Symbol(t)) returns ERROR: UndefVarError: ProcStatus not defined
     fieldsyms = Symbol[]
     fielddscrs = Tuple{DataType,Int,Int}[] # type, shift, bits
     shift = 0
     for e in decls 
         #println("sym = ",e.args[1], "type = ", e.args[2], " typeof=",typeof(e.args[2]))
         t = e.args[2] # type
-        #println("t = ",t)
+        println("t = ",t)
         t = eval(Symbol(t))
-        #println("eval(t) = ",dump(t))
+        println("eval(t) = ",dump(t))
+        bits = bitsizeof(t)
+        push!(fieldsyms,e.args[1])
+        push!(fielddscrs,(t,shift,bits))
+        shift += bits
+        #println("shift=",shift)
+        shift > 64 && throw(DomainError(e.args[1],"BitStruct too huge: would exceed a total bitsize of 64"))
+    end
+    =#
+    # build the expressions to execute
+    ret = quote
+        const $(esc(name)) = $(bitstruct)
+    end
+    return ret
+end
+
+
+function bitsizeof(::Type{BitStruct{T}}) where T
+    lastsym = last(T.parameters[1])
+    type,shift,bits = _fielddescr(BitStruct{T},lastsym)
+    return shift+bits
+end
+
+"""
+    check(::Type(BitStruct))
+    
+Verify that all declared fields have supported bitfield types.
+Verify that total bit size does not exceed 64
+"""
+function check(::Type{BitStruct{T}}) where T
+    T <: NamedTuple || throw(DomainError(T,"Type Parameter of BitStruct is not a NamedTuple"))
+    syms = T.parameters[1]
+    types = T.parameters[2].parameters
+    shift = 0
+    i = 0
+    for s in syms
+        i += 1
+        shift += bitsizeof(types[i])
+    end
+    shift <= 64 || throw(DomainError(BitStruct{T},"Total bitsize is $shift - does not fit into 64 bit"))
+end
+
+
+# required by dump(aBitStructType)
+function Base.datatype_fieldtypes(::Type{BitStruct{T}}) where T
+    T.parameters[2].parameters
+end
+
+# DEBUG version
+macro bs(name,ex)
+    Meta.isexpr(ex, :braces) || Meta.isexpr(ex, :block) ||
+        throw(ArgumentError("@bitstruct expects name {...} or name begin...end"))
+    
+    #q = Symbol("ProcStatus")
+    #println(q)
+    #println(eval(q))
+    #println(dump(eval(q)))
+    decls = filter(e -> !(e isa LineNumberNode), ex.args)
+    all(e -> Meta.isexpr(e, :(::)), decls) || throw(ArgumentError("@bitstruct must contain a sequence of name::type expressions, nothing else"))
+    for e in decls 
+        #println("ex item: ",e," :: ",typeof(e), " -> args",e.args)        
+    end
+    vars = [QuoteNode(e.args[1]) for e in decls]
+    types = [esc(e.args[2]) for e in decls]
+    bitstruct = :(BitStruct{NamedTuple{($(vars...),), Tuple{$(types...)}}})
+    println("type is: ",bitstruct) 
+    # so far adopted from @NamedTuples. Now: build fielddescr table
+    fieldsyms = Symbol[]
+    fielddscrs = Tuple{DataType,Int,Int}[] # type, shift, bits
+    shift = 0
+    for e in decls 
+        #println("sym = ",e.args[1], "type = ", e.args[2], " typeof=",typeof(e.args[2]))
+        t = e.args[2] # type
+        println("t = ",t)
+        t = eval(Symbol(t))
+        println("eval(t) = ",dump(t))
         bits = bitsizeof(t)
         push!(fieldsyms,e.args[1])
         push!(fielddscrs,(t,shift,bits))
@@ -338,8 +419,7 @@ macro bitstruct(name,ex)
     end
     return ret
 end
-
-export bs
+export @bs
 
 
 #=

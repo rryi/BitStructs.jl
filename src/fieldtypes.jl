@@ -24,6 +24,43 @@ a value range check is performed as @boundscheck.
 struct BInt{N} end
 
 
+"""
+Type to be used in BitStruct field declarations, only.
+
+It declares a Char field with restricted value range 
+for ASCII characters, only.
+
+Encoding in a BitStruct consumes 7 bits.
+
+A read access to such a field returns a Char representing an
+ASCII character. , meaning Int(). Int.
+
+When storing a Char value to such a field, 
+a value range check is performed as @boundscheck.
+for a c::Char, range check verifies UInt(c)<=127.
+"""
+struct AsciiChar end
+
+"""
+Type to be used in BitStruct field declarations, only.
+
+It declares a Char field with restricted value range 
+covering all characters defined in the Latin1 encoding, which is 
+the same as ISO-8859-1.
+
+In Unicode, these characters map on ihe first 256 code points.
+
+Encoding in a BitStruct consumes 8 bits.
+
+A read access to such a field returns a Char representing an
+Latin1 character.
+
+When storing a Char value to such a field, 
+a value range check is performed as @boundscheck.
+for a c::Char, range check verifies UInt(c)<=255
+"""
+struct Latin1Char end
+
 
 """
     bitsizeof(T)
@@ -39,7 +76,10 @@ bitsizeof(::Type{BUInt{N}}) where N = N
 bitsizeof(::Type{Bool}) = 1
 bitsizeof(::Type{T}) where T<: Enum = 8*sizeof(Int) - leading_zeros(Int(typemax(T))-Int(typemin(T)))
 
-bitsizeof(::Type{T}) where T<: Union{UInt8,UInt16,UInt32,Int8,Int16,Int32,Float16,Float32} = 8*sizeof(T)
+bitsizeof(::Type{T}) where T<: Union{UInt8,UInt16,UInt32,Int8,Int16,Int32,Float16,Float32,Char} = 8*sizeof(T)
+bitsizeof(::Type{AsciiChar}) = 7
+bitsizeof(::Type{Latin1Char}) = 8
+
 
 
 "throw an error if v used more that its lowest *bits* bits"
@@ -96,6 +136,10 @@ end
     @boundscheck checkbitsize(v,bitsizeof(T))
     T(v%Int - Int(typemin(T)))
 end
+@inline function decode(::Type{T},v::UInt64) where T<:Union{AsciiChar,Latin1Char}
+    @boundscheck checkbitsize(v,bitsizeof(T))
+    Char(v)
+end
 
 
 # conversions from external property type to bitfield
@@ -120,7 +164,7 @@ encode(decode(T,u)) == u
 end
 
 @inline function encode(v::T,bits) where T<:Signed     
-    @boundscheck ( v < -1<<(bits-1) || v>= 1<<(bits-1) ) &&  throw(BoundsError(v))
+    @boundscheck ( v < -1<<(bits-1) || v>= 1<<(bits-1) ) &&  throw(DomainError(v,"out of range for BInt{$bits}"))
     return (v % UInt64)&_mask(bits)
 end
 
@@ -138,7 +182,14 @@ end
 @inline function encode(v::Float16,bits)
     return reinterpret(UInt16,v)%UInt64
 end
+
 @inline function encode(v::Float32,bits)
     return reinterpret(UInt32,v)%UInt64
+end
+   
+@inline function encode(v::Char,bits)
+    u = UInt64(v)
+    @boundscheck checkbitsize(u,bits)
+    return u
 end
    

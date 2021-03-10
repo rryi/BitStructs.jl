@@ -30,7 +30,7 @@ BitStructs has the following use cases in mind:
 
 Well, BitStruct is an immutable type. Literally writing a field is not possible.
 But we can construct a new BitStruct having a field replaced. To have a neat short syntax,
-the division operator is overloaded: left side is a BitStruct, right side a Typle{Symbol,T} 
+the division operator is overloaded: left side is a BitStruct, right side a Tuple{Symbol,T} 
 where T is the type of the BitStruct field. An Example:
 
 
