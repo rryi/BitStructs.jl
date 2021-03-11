@@ -134,7 +134,7 @@ end
 end
 @inline function decode(::Type{T},v::UInt64) where T<:Enum
     @boundscheck checkbitsize(v,bitsizeof(T))
-    T(v%Int - Int(typemin(T)))
+    T(v%Int + Int(typemin(T)))
 end
 @inline function decode(::Type{T},v::UInt64) where T<:Union{AsciiChar,Latin1Char}
     @boundscheck checkbitsize(v,bitsizeof(T))
@@ -176,9 +176,10 @@ types, or encode already does a projection, like in the case of type
 Sign in tutorial.jl. For similar types with suitable convert and 
 promote rules the relation usually holds.
 """
-@inline function encode(::Type{T}, v::V) where {T<:Union{Unsigned,BUInt}, V<:Unsigned}  
-    @boundscheck checkbitsize(v,bitsizeof(T))
-    return v % UInt64
+@inline function encode(::Type{T}, v::V) where {T<:Union{Unsigned,BUInt}, V<:Unsigned}
+    u = v%UInt64
+    @boundscheck checkbitsize(u,bitsizeof(T))
+    return u
 end
 
 @inline function encode(::Type{T}, v::V) where {T<:Union{Signed,BInt}, V<:Integer}
@@ -189,7 +190,7 @@ end
 
 
 @inline function encode(::Type{T}, v::T) where {T<:Enum}     
-    u = (Int(v)+Int(typemin(T)))%UInt64
+    u = (Int(v)-Int(typemin(T)))%UInt64
     @boundscheck checkbitsize(u,bitsizeof(T))
     return u
 end
@@ -207,9 +208,9 @@ end
 end
 
    
-@inline function encode(::Type{T}, v::V) where {T<:Union{Char,AsciiChar,Latin1Char, V<:Char}
+@inline function encode(::Type{T}, v::V) where {T<:Union{Char,AsciiChar,Latin1Char}, V<:Char}
     u = UInt64(v)
-    @boundscheck checkbitsize(u,bits)
+    @boundscheck checkbitsize(u,bitsizeof(T))
     return u
 end
    
