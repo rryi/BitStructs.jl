@@ -60,7 +60,7 @@ If pstruct and value are interpreted as bit vector, it performs pstruct[shift+1:
 Boundscheck tests if no bit is set in balue except the lowest *bits* bits. 
 This is guaranteed by encode(...,bits).
 """
-@Base.pure function _set(pstruct::UInt64,shift,bits,value::UInt64) 
+function _set(pstruct::UInt64,shift,bits,value::UInt64) 
     @boundscheck checkbitsize(value,bits)
     pstruct &= !(_mask(bits) << shift) # delete bitfield
     pstruct |= value << shift
@@ -151,7 +151,7 @@ end
 
 replace field s in ps by v.
 """
-function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
+@inline function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     t,shift, bits = _fielddescr(BitStruct{T},Val(s))
     u = encode(t,v)
@@ -165,7 +165,7 @@ end
 
 replace field s in ps by v.
 """
-function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
+@inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
     set(x,t[1],t[2])
 end
 
@@ -175,7 +175,7 @@ end
 replace a selection of fields given by named parameters.
 parameter names in args must match properties of ps
 """
-function set(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
+function setm(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in pairs(kwargs)
         s = p.first
@@ -188,7 +188,7 @@ end
 
 
 # for benchmarking, only
-function set2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
+function setm2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     nt = kwargs.data # the named tupla
     syms = typeof(nt).parameters[1]
@@ -224,7 +224,8 @@ end
 #    set(reinterpret(BitStruct{T},zero(UInt64));kwargs...)
 #end
 
-        
+# deprecated
+#=
 # first try: constructor setting some fields. TODO redesign using helper methods
 "constructor setting some fields, fields not included in nt stay 0"
 function BitStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
@@ -253,7 +254,7 @@ function BitStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
     end
     return reinterpret(BitStruct{T},ret)
 end
-
+=#
 
 
 """

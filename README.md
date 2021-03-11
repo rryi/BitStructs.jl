@@ -20,29 +20,13 @@ BitStructs has the following use cases in mind:
  # current state: in development
 
  As soon as I think the package is usable, it will become a registered julia package.
- 
 
- # syntax
+see test/tutorial.jl for an introduction
 
- # reading a BitStruct field
+see test/benchmarks.jl for some timing comparisons
 
- # writing a BitStruct field
+With julia 1.6-RC1, reading fields is nearly as fast as reading fields in standard julia struct-s. 
+Older julia releases do not perform full constant propagation on field read access ==> 100-1000 times slower.
 
-Well, BitStruct is an immutable type. Literally writing a field is not possible.
-But we can construct a new BitStruct having a field replaced. To have a neat short syntax,
-the division operator is overloaded: left side is a BitStruct, right side a Tuple{Symbol,T} 
-where T is the type of the BitStruct field. An Example:
+Setting fields is currently under investigation.
 
-
-    @bitstruct BS begin
-    i1 :: BInt{6}
-    u1 :: UInt8
-    end
-
-    bs = BS(i1=3,u1=0x02)
-
-    bs = bs / (:u1,0x17) # replaces field :u1 value by 0x17
-
-    bs /= :i1,5  # assigns 5 to bitfield :i1
-
-TODO: support |= &= as well? NO 

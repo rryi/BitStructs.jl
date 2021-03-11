@@ -9,7 +9,10 @@ function decode end
 end
 =#
 
-
+function prompt(p::AbstractString="")
+    println(p, " ENTER: ")
+    #return chomp(readline())
+end
 
 
 """
@@ -260,6 +263,7 @@ mutable struct T
     flag1::Bool
     flag2::Bool
 end
+Base.copy(x::T) = T([getfield(x, k) for k ∈ fieldnames(T)]...)
 
 @bitstruct BT begin
     id1::BUInt{16}
@@ -271,14 +275,68 @@ end
 t = T(5%UInt16, 6%UInt16, true, false)
 bt = BT(5%UInt16, 6%UInt16, true, false)
 
-#@btime $t.i1,$t.i2,$t.f1,$t.f2
+
+prompt("struct/BitStruct simple field access")
+@btime $t.id1,$t.id2,$t.flag1,$t.flag2
 # this is optimized away, totally
-#@btime $bt.i1,$bt.i2,$bt.f1,$bt.f2
+@btime $bt.id1,$bt.id2,$bt.flag1,$bt.flag2
 
 
-#@noinline bench1(t) = (t.i1+t.i2,t.f1,t.f2)
-#@btime bench1($t)
-#@btime bench1($bt)
+prompt("struct/BitStruct field access in @noinline function")
+@noinline bench1(t) = (t.id1+t.id2,t.flag1,t.flag2)
+@btime bench1($t)
+@btime bench1($bt)
+
+@noinline function set2fields(s)
+    if typeof(s) <: BitStruct
+        s /= :id1, s.id2
+        s /= :flag1, s.flag2
+    else
+        s.id1 = s.id2
+        s.flag1 = s.flag2
+    end
+end
+
+
+tc = copy(t)
+prompt("set 2 fields on struct then BitStruct")
+@btime set2fields($tc)
+@btime set2fields($bt)
+
+
+sc = copy(s)
+prompt("set 2 fields on struct then BitStruct (large struct)")
+@btime set2fields($sc)
+# !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
+@btime set2fields($bs)
+
+# drill down on time consume setting a field
+
+
+
+prompt("b1 set field in loop by /=")
+@noinline function b1(b::T) where T <: BitStruct
+    s = 0%UInt64
+    for i in zero(UInt64):UInt64(100)
+        b /= (:id1, i)
+        s += b.id1
+    end        
+    return s
+end
+@btime (b1($bt))
+
+
+prompt("b2 set field in loop by set(..)")
+@noinline function b2(b::T) where T <: BitStruct
+    s = 0%UInt64
+    for i in zero(UInt64):UInt64(100)
+        b = BitStructs.set(b,:id1, i)
+        s += b.id1
+    end        
+    return s
+end
+@btime (b2($bt))
+
 
 
 
@@ -294,9 +352,9 @@ end
 
 "access 4 fields in a loop"
 function bench1(vec)
-    sum = 0
+    sum = 0%UInt64
     for t in vec
-        sum += t.id1+t.id2+Int(t.flag1)+Int(t.flag2)
+        sum += t.id1+t.id2+UInt(t.flag1)+UInt(t.flag2)
     end
     sum
 end
@@ -304,18 +362,34 @@ end
 "write 4 fields in a loop"
 function bench2(vec)
     sum = 0
-    for t in vec
-        
-        sum += t.id1+t.id2+Int(t.flag1)+Int(t.flag2)
+    if eltype(vec) <: BitStruct
+        for i in 2:length(vec)
+            t = vec[i]
+            t = t / (:id1 , i%UInt64) / (:id2 , i%UInt64) / (:flag1 , i%2 ==0) / (:flag2 , i%2 !=0)
+            sum += t.id1
+            vec[i-1] = t
+        end
+    else
+        for i in 2:length(vec)
+            t = vec[i]
+            t.id1 = i%UInt64
+            t.id2 = i%UInt64
+            t.flag1 = (i%2 ==0)
+            t.flag2 = (i%2 !=0)
+            sum += t.id1
+            vec[i-1] = t
+        end
     end
     sum
 end
 
-println("struct: access 4 fields in a loop")
+prompt("struct/BitStruct: access 4 fields in a loop")
 @btime bench1($tv)
-
-println("bitstruct: access 4 fields in a loop")
 @btime bench1($btv)
+
+prompt("struct/BitStruct: write 4 fields in a loop")
+@btime bench2($tv)
+@btime bench2($btv)
 
 
 
@@ -329,21 +403,21 @@ for i in 1:100
 end
 
 
-println("struct: access 4 fields in a loop, large struct")
-@btime bench($sv)
+prompt("struct/BitStruct: access 4 fields in a loop, large struct")
+@btime bench1($sv)
+@btime bench1($bsv)
 
-println("bitstruct: access 4 fields in a loop, large struct")
-@btime bench($bsv)
-
+prompt("struct/BitStruct: write 4 fields in a loop, large struct")
+@btime bench2($sv)
+@btime bench2($bsv)
 
 
 
 
 
 # currently, bad again... no constant propagation.
-println("struct: access 4 fields, direct code")
+prompt("struct/BitStruct: access 4 fields, direct code")
 @btime $s.delta1-$s.delta2,$s.id1, $s.id2
-println("bitstruct: access 4 fields, direct code. Compiled away ...")
 @btime $bs.delta1-$bs.delta2,$bs.id1, $bs.id2
 
 
@@ -352,14 +426,8 @@ println("bitstruct: access 4 fields, direct code. Compiled away ...")
 
 
 
-
-
-
-
-
-
 ## function parameter list benchmark
-
+prompt("function parameter benchmark: struct/BitStruct/parameterlist")
 @btime workOnS($v1,$v2,$s)
 
 @btime workOnS($v1,$v2,$bs)
