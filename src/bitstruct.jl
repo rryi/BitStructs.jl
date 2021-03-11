@@ -87,8 +87,30 @@ This function is slow, even with multiple dispatch. It is replaced at
 compile time by @BitStruct which generates specialized fast methods, 
 returning a constant
 """
+@generated function __fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+    shift = 0
+    types = T.parameters[2].parameters
+    syms = T.parameters[1]
+    idx = 1
+    while idx <= length(syms)
+        type = types[idx]
+        #bits = bitsizeof(type)
+        bits = Int(Base.invokelatest(bitsizeof,type))
+        if syms[idx]===s
+            return :(($type,$shift,$bits))
+        end
+        shift += bits
+        idx += 1
+    end
+    throw(ArgumentError(s)) 
+end
 
-@inline function _fielddescr(::Type{BitStruct{T}},s::Symbol) where {T<:NamedTuple}
+
+# constant propagation did work in this recursive formulation, but is fragile ... 
+# some changes later, it was lost
+
+
+@inline function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s}
     _fielddescr(Tuple{T.parameters[1]...}, T.parameters[2],Val(s),0)
 end
 
@@ -105,7 +127,7 @@ end
 
 
 @inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BitStruct{T},s)
+    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
     return decode(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
@@ -116,7 +138,7 @@ function Base.show(x::BitStruct{T}) where T<:NamedTuple
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
     for s in syms
-        t,shift, bits = _fielddescr(BitStruct{T},s)
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
         #println("  ",s, "::",t, " , ",shift," , ",bits)
         println("  ",s, "::",t, " = ",repr(decode(t,_get(ps,shift,bits))))
     end
@@ -131,7 +153,7 @@ replace field s in ps by v.
 """
 function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
-    t,shift, bits = _fielddescr(BitStruct{T},s)
+    t,shift, bits = _fielddescr(BitStruct{T},Val(s))
     u = encode(t,v)
     ret = _set(ret,Val(shift),Val(bits),u)
     return reinterpret(BitStruct{T},ret)
@@ -157,7 +179,7 @@ function set(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in pairs(kwargs)
         s = p.first
-        t,shift, bits = _fielddescr(BitStruct{T},s)
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
         v = encode(t,p.second)
         ret = _set(ret,Val(shift),Val(bits),v)
     end
@@ -173,7 +195,7 @@ function set2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     idx = 1
     while idx <= length(syms)
         s = syms[idx]
-        t,shift, bits = _fielddescr(BitStruct{T},s)
+        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
         v = encode(t,nt[idx])
         ret = _set(ret,Val(shift),Val(bits),v)
     end
@@ -358,7 +380,7 @@ end
 
 function bitsizeof(::Type{BitStruct{T}}) where T
     lastsym = last(T.parameters[1])
-    type,shift,bits = _fielddescr(BitStruct{T},lastsym)
+    type,shift,bits = _fielddescr(BitStruct{T},Val(lastsym))
     return shift+bits
 end
 
