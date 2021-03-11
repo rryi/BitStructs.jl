@@ -307,9 +307,16 @@ prompt("set 2 fields on struct then BitStruct")
 sc = copy(s)
 prompt("set 2 fields on struct then BitStruct (large struct)")
 @btime set2fields($sc)
-# !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
-@btime set2fields($bs)
 
+println("the statements executed by set2fields run, if executed directly")
+bs /= :id1, s.id2
+bs /= :flag1,bs.flag2
+show(bs)
+println("Calling set2fields(bs) causes a crash")
+set2fields(bs)
+# !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
+#set2fields(bs)
+#@btime set2fields($bs)
 # drill down on time consume setting a field
 
 
@@ -389,7 +396,9 @@ prompt("struct/BitStruct: access 4 fields in a loop")
 
 prompt("struct/BitStruct: write 4 fields in a loop")
 @btime bench2($tv)
-@btime bench2($btv)
+#crash!
+#bench2(btv)
+#@btime bench2($btv)
 
 
 
@@ -409,7 +418,9 @@ prompt("struct/BitStruct: access 4 fields in a loop, large struct")
 
 prompt("struct/BitStruct: write 4 fields in a loop, large struct")
 @btime bench2($sv)
-@btime bench2($bsv)
+#crash!
+#bench2(bsv)
+#@btime bench2($bsv)
 
 
 
@@ -429,8 +440,9 @@ prompt("struct/BitStruct: access 4 fields, direct code")
 ## function parameter list benchmark
 prompt("function parameter benchmark: struct/BitStruct/parameterlist")
 @btime workOnS($v1,$v2,$s)
-
-@btime workOnS($v1,$v2,$bs)
+#crash!
+#workOnS(v1,v2,bs)
+#@btime workOnS($v1,$v2,$bs)
 
 @btime workOnS($v1,$v2,S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
 
