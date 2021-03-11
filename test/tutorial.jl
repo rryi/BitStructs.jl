@@ -36,6 +36,7 @@ show(bs1st)
 bs1st /= :aFlag, false
 show(bs1st)
 
+
 # so far with 1st steps 
 
 
@@ -75,7 +76,7 @@ println("bits used by Strange with custom encoding:", bitsizeof(Strange))
 # so that you can apply the sign by a multiplication.
 struct Sign end
 BitStructs.bitsizeof(::Type{Sign}) = 1
-BitStructs.encode(::Type{Sign},v::Float64) = (v.value>0 ? zero(UInt64) : one(UInt64))
+BitStructs.encode(::Type{Sign},v::Float64) = (v>=0.0 ? zero(UInt64) : one(UInt64))
 BitStructs.decode(::Type{Sign},u::UInt64) = (u==zero(UInt64) ? 1.0 : -1.0)
 
 
