@@ -1,6 +1,15 @@
-
 using BitStructs
 using BenchmarkTools
+
+#=
+module BitStructs
+function bitsizeof end
+function encode end
+function decode end
+end
+=#
+
+
 
 
 """
@@ -27,11 +36,13 @@ BitStructs.decode(::Type{Sign},u::UInt64) = (u==zero(UInt64) ? 1.0 : -1.0)
 
 
 
+
+
 """
 BS is a BitStruct designed to demonstrate BitStruct advantages.
 
 As such, it has many small fields and two fields for data types which were not designed 
-for memory efficiency, demonstrating how a custom encoding can overcome memory deficiencies.
+for memory efficiency (Strange,Sign), demonstrating how a custom encoding can overcome memory deficiencies.
 """
 @bitstruct BS begin
     status :: ProcStatus # could be the overall status of some process
@@ -124,7 +135,7 @@ end
     else
         s /= :id1, abs(s.delta2 - s.delta1) %UInt64
     end
-    s /= :sign , Float64(s.delta1 * s.delta2) # projection ont 1.0/-1.0 is done by encode
+    s /= :sign , Float64(s.delta1 * s.delta2) # projection on 1.0/-1.0 is done by encode
     v1[2] = v2[3]
     if s.status == S_RUNNING && s.sign < 0.0
         s /= :status, S_DONE
@@ -244,27 +255,85 @@ show(bs)
 ## some simple field access benchmarks to begin with
 
 mutable struct T
-    i1::Int16
-    i2::Int16
-    f1::Bool
-    f2::Bool
+    id1::UInt16
+    id2::UInt16
+    flag1::Bool
+    flag2::Bool
 end
 
 @bitstruct BT begin
-    i1::BInt{16}
-    i2::BInt{16}
-    f1::Bool
-    f2::Bool
+    id1::BUInt{16}
+    id2::BUInt{16}
+    flag1::Bool
+    flag2::Bool
 end
 
-t = T(5%Int16, 6%Int16, true, false)
-bt = BT(5,6, true, false)
+t = T(5%UInt16, 6%UInt16, true, false)
+bt = BT(5%UInt16, 6%UInt16, true, false)
 
-@btime $t.i1,$t.i2,$t.f1,$t.f2
+#@btime $t.i1,$t.i2,$t.f1,$t.f2
+# this is optimized away, totally
+#@btime $bt.i1,$bt.i2,$bt.f1,$bt.f2
 
-@btime $bt.i1,$bt.i2,$bt.f1,$bt.f2
+
+#@noinline bench1(t) = (t.i1+t.i2,t.f1,t.f2)
+#@btime bench1($t)
+#@btime bench1($bt)
 
 
+
+btv = BT[]
+tv =  T[]
+
+
+for i in 1:100
+    push!(tv,T(i%UInt16,(i+1)%UInt16,true,false))
+    push!(btv,BT(i%UInt16,(i+1)%UInt16,true,false))
+end
+
+
+"access 4 fields in a loop"
+function bench1(vec)
+    sum = 0
+    for t in vec
+        sum += t.id1+t.id2+Int(t.flag1)+Int(t.flag2)
+    end
+    sum
+end
+
+"write 4 fields in a loop"
+function bench2(vec)
+    sum = 0
+    for t in vec
+        
+        sum += t.id1+t.id2+Int(t.flag1)+Int(t.flag2)
+    end
+    sum
+end
+
+println("struct: access 4 fields in a loop")
+@btime bench1($tv)
+
+println("bitstruct: access 4 fields in a loop")
+@btime bench1($btv)
+
+
+
+bsv = BS[]
+sv =  S[]
+
+
+for i in 1:100
+    push!(sv,s)
+    push!(bsv,bs)
+end
+
+
+println("struct: access 4 fields in a loop, large struct")
+@btime bench($sv)
+
+println("bitstruct: access 4 fields in a loop, large struct")
+@btime bench($bsv)
 
 
 
@@ -272,9 +341,9 @@ bt = BT(5,6, true, false)
 
 
 # currently, bad again... no constant propagation.
+println("struct: access 4 fields, direct code")
 @btime $s.delta1-$s.delta2,$s.id1, $s.id2
-
-
+println("bitstruct: access 4 fields, direct code. Compiled away ...")
 @btime $bs.delta1-$bs.delta2,$bs.id1, $bs.id2
 
 
