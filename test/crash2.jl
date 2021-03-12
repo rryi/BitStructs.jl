@@ -20,9 +20,31 @@ bs = BS(true,false,0x1,0x2)
     end
 end
 
+@noinline function set2fields2(bs::T) where T <: BitStruct
+    if typeof(bs) <: BitStruct
+        bs /= :id1, bs.id2
+        bs /= :flag1, bs.flag2
+    else
+        bs.id1 = bs.id2
+        bs.flag1 = bs.flag2
+    end
+end
+
+function set2fields3(bs::T) where T <: BitStruct
+    if typeof(bs) <: BitStruct
+        bs /= :id1, bs.id2
+        bs /= :flag1, bs.flag2
+    else
+        bs.id1 = bs.id2
+        bs.flag1 = bs.flag2
+    end
+end
+
 #println("the statements executed by set2fields run, if executed directly")
 #bs /= :id1, bs.id2
 #bs /= :flag1,bs.flag2
 #show(bs)
 println("Calling set2fields(bs) causes a crash")
-set2fields(bs)
+#set2fields(bs)
+set2fields2(bs) 
+set2fields3(bs) 
