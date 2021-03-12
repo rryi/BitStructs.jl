@@ -92,12 +92,8 @@ mutable struct S
     delta1 :: Int16 # -256..255
     delta2 :: Int16 # -256..255 
 end
-Base.copy(x::T) where T<:S = T([getfield(x, k) for k ∈ fieldnames(T)]...)
+#Base.copy(x::T) where T<:S = T([getfield(x, k) for k ∈ fieldnames(T)]...)
 
-
-
-v1 = [1,2,3]
-v2 = [4,5,6]
 
 s = S(S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
 bs = BS(S_RUNNING,BIGMINUS,-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
@@ -131,17 +127,6 @@ t = T(5%UInt16, 6%UInt16, true, false)
 bt = BT(5%UInt16, 6%UInt16, true, false)
 
 
-prompt("struct/BitStruct simple field access")
-#@btime $t.id1,$t.id2,$t.flag1,$t.flag2
-# this is optimized away, totally
-#@btime $bt.id1,$bt.id2,$bt.flag1,$bt.flag2
-
-
-prompt("struct/BitStruct field access in @noinline function")
-@noinline bench1(t) = (t.id1+t.id2,t.flag1,t.flag2)
-@btime bench1($t)
-@btime bench1($bt)
-
 @noinline function set2fields(s)
     if typeof(s) <: BitStruct
         s /= :id1, s.id2
@@ -151,17 +136,6 @@ prompt("struct/BitStruct field access in @noinline function")
         s.flag1 = s.flag2
     end
 end
-
-
-tc = copy(t)
-prompt("set 2 fields on struct then BitStruct")
-#@btime set2fields($tc)
-#@btime set2fields($bt)
-
-
-sc = copy(s)
-prompt("set 2 fields on struct then BitStruct (large struct)")
-#@btime set2fields($sc)
 
 println("the statements executed by set2fields run, if executed directly")
 bs /= :id1, s.id2
