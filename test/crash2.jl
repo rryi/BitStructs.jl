@@ -24,6 +24,6 @@ end
 println("the statements executed by set2fields run, if executed directly")
 bs /= :id1, bs.id2
 bs /= :flag1,bs.flag2
-show(bs)
+#show(bs)
 println("Calling set2fields(bs) causes a crash")
 set2fields(bs)
