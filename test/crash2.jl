@@ -10,13 +10,13 @@ end
 bs = BS(true,false,0x1,0x2)
 #show(bs)
 
-@noinline function set2fields(s)
-    if typeof(s) <: BitStruct
-        s /= :id1, s.id2
-        s /= :flag1, s.flag2
+@noinline function set2fields(bs)
+    if typeof(bs) <: BitStruct
+        bs /= :id1, bs.id2
+        bs /= :flag1, bs.flag2
     else
-        s.id1 = s.id2
-        s.flag1 = s.flag2
+        bs.id1 = bs.id2
+        bs.flag1 = bs.flag2
     end
 end
 
