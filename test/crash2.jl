@@ -46,5 +46,5 @@ end
 #show(bs)
 println("Calling set2fields(bs) causes a crash")
 #set2fields(bs)
-set2fields2(bs) 
+#set2fields2(bs) 
 set2fields3(bs) 
