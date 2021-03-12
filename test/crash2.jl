@@ -8,8 +8,7 @@ using BitStructs
 end
 
 bs = BS(true,false,0x1,0x2)
-
-show(bs)
+#show(bs)
 
 @noinline function set2fields(s)
     if typeof(s) <: BitStruct
