@@ -40,8 +40,8 @@ As such, it has many small fields and two fields for data types which were not d
 for memory efficiency (Strange,Sign), demonstrating how a custom encoding can overcome memory deficiencies.
 """
 @bitstruct BS begin
-    status :: ProcStatus # could be the overall status of some process
-    strange :: Strange 
+    #status :: ProcStatus # could be the overall status of some process
+    #strange :: Strange 
     sign :: Sign
     flag1 :: Bool
     flag2 :: Bool
@@ -56,7 +56,7 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
     delta2 :: BInt{9} # -256..255 
 end
 
-bs = BS(S_RUNNING,BIGMINUS,-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
+bs = BS(-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
 
 show(bs)
 
