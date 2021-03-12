@@ -42,7 +42,7 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
 @bitstruct BS begin
     #status :: ProcStatus # could be the overall status of some process
     #strange :: Strange 
-    sign :: Sign
+    #sign :: Sign
     flag1 :: Bool
     flag2 :: Bool
     flag3 :: Bool # to be honest: many flags push memory savings and runtime advantages of this BitStruct
@@ -56,7 +56,7 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
     delta2 :: BInt{9} # -256..255 
 end
 
-bs = BS(-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
+bs = BS(true,false,false,true,0,'a','c',0x1,0x2,3,4)
 
 show(bs)
 
