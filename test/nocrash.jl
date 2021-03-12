@@ -67,6 +67,10 @@ function set2fields8(bs::T) where T <: BitStruct
 end
 
 function set2fields9(bs::T) where T <: BitStruct
+    bs = BitStructs.set(bs, :flag1, bs.flag2) # crash
+end
+
+function set2fields10(bs::T) where T <: BitStruct
     bs = BitStructs.set(bs, :id1, bs.id2)
     #bs = BitStructs.set(bs, :flag1, bs.flag2) # crash, replaced by manual inlining of the call
     #=
@@ -86,7 +90,7 @@ function set2fields9(bs::T) where T <: BitStruct
     return reinterpret(T,ret)
 end
 
-function set2fields10(bs::BitStruct{T}) where T <: NamedTuple
+function set2fields11(bs::BitStruct{T}) where T <: NamedTuple
     bs = BitStructs.set(bs, :id1, bs.id2)
     #bs = BitStructs.set(bs, :flag1, bs.flag2) # crash, replaced by manual inlining of the call
     #=
@@ -119,6 +123,8 @@ println("Calling set2fields(bs) causes a crash")
 set2fields5(bs) # NO crash !!
 set2fields6(bs) # NO crash !!
 #set2fields7(bs) # crash in line 61, code ´bs /= :flag1, bs.flag2´
-#set2fields8(bs) # crashes in line 69, code ´bs /= :flag1, bs.flag2´
+#set2fields8(bs) # crashes in line 66, code ´bs = BitStructs.set(bs, :flag1, bs.flag2)´
 set2fields9(bs) # NO crash !!
 set2fields10(bs) # NO crash !!
+set2fields11(bs) # NO crash !!
+
