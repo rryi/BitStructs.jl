@@ -1,36 +1,6 @@
 using BitStructs
 
 
-function prompt(p::AbstractString="")
-    println(p, " ENTER: ")
-    #return chomp(readline())
-end
-
-
-"""
-An usual Enum, and very well suited für BitStructs
-"""
-@enum ProcStatus ::UInt8 S_WAITING S_RUNNING S_DONE S_FAILURE
-
-
-"""
-A not so well defined Enum, but very well suited für BitStructs with customized encoding.
-"""
-@enum Strange ::Int BIGMINUS=-999999 ONE=1 TWO=2 THREE=3
-BitStructs.bitsizeof(::Type{Strange}) = 2
-BitStructs.encode(v::Strange) = (v==BIGMINUS ? zero(UInt64) : Int(v)%UInt64)
-BitStructs.decode(::Type{Strange},u::UInt64) = (u==zero(UInt64) ? BIGMINUS : StrangeEncoded(u))
-
-"""
-An example of a custom bit type in the Float64 domain.
-"""
-struct Sign end
-BitStructs.bitsizeof(::Type{Sign}) = 1
-BitStructs.encode(::Type{Sign},v::Float64) = (v>=0.0 ? zero(UInt64) : one(UInt64))
-BitStructs.decode(::Type{Sign},u::UInt64) = (u==zero(UInt64) ? 1.0 : -1.0)
-
-
-
 
 
 """
