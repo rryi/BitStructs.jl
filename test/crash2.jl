@@ -116,16 +116,6 @@ mutable struct T
 end
 Base.copy(x::T) = T([getfield(x, k) for k ∈ fieldnames(T)]...)
 
-@bitstruct BT begin
-    id1::BUInt{16}
-    id2::BUInt{16}
-    flag1::Bool
-    flag2::Bool
-end
-
-t = T(5%UInt16, 6%UInt16, true, false)
-bt = BT(5%UInt16, 6%UInt16, true, false)
-
 
 @noinline function set2fields(s)
     if typeof(s) <: BitStruct
@@ -143,8 +133,3 @@ bs /= :flag1,bs.flag2
 show(bs)
 println("Calling set2fields(bs) causes a crash")
 set2fields(bs)
-# !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
-#set2fields(bs)
-#@btime set2fields($bs)
-# drill down on time consume setting a field
-
