@@ -59,6 +59,14 @@ function set2fields7(bs::T) where T <: BitStruct
     bs /= :flag1, bs.flag2
 end
 
+function set2fields8(bs::T) where T <: BitStruct
+    println(typeof(bs))
+    println(bs.id2)
+    println(typeof(bs.id2))
+    bs = BitStruct.set(bs, :id1, bs.id2)
+    bs /= :flag1, bs.flag2
+end
+
 
 #println("the statements executed by set2fields run, if executed directly")
 #bs /= :id1, bs.id2 # no crash
@@ -71,7 +79,7 @@ println("Calling set2fields(bs) causes a crash")
 #set2fields4(bs) # crash
 set2fields5(bs) # NO crash !!
 set2fields6(bs) # NO crash !!
-set2fields7(bs) # NO crash but weird error message:
+#set2fields7(bs) # NO crash but weird error message:
 #=
 ERROR: LoadError: type UnionAll has no field set
 Stacktrace:
@@ -84,3 +92,4 @@ Stacktrace:
 in expression starting at c:\Users\RR\julia\BitStructs\test\crash2.jl:74
 =#
 
+set2fields8(bs)
