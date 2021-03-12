@@ -1,13 +1,5 @@
 using BitStructs
-using BenchmarkTools
 
-#=
-module BitStructs
-function bitsizeof end
-function encode end
-function decode end
-end
-=#
 
 function prompt(p::AbstractString="")
     println(p, " ENTER: ")
