@@ -52,11 +52,11 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
     #lc :: Latin1Char # similar use 8 bits for the Latin-1 character set
     id1 :: BUInt{9} # 0..511
     id2 :: BUInt{12} # 0..4095
-    delta1 :: BInt{9} # -256..255
-    delta2 :: BInt{9} # -256..255 
+    #delta1 :: BInt{9} # -256..255
+    #delta2 :: BInt{9} # -256..255 
 end
 
-bs = BS(true,false,false,true,0,0x1,0x2,3,4)
+bs = BS(true,false,false,true,0,0x1,0x2)
 
 show(bs)
 
