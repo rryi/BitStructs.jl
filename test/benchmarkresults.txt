@@ -1,0 +1,46 @@
+commit
+
+struct/BitStruct simple field access ENTER: 
+  3.100 ns (0 allocations: 0 bytes)
+  0.001 ns (0 allocations: 0 bytes)
+struct/BitStruct field access in @noinline function ENTER:
+  3.100 ns (0 allocations: 0 bytes)
+  0.001 ns (0 allocations: 0 bytes)
+set 2 fields on struct then BitStruct ENTER: 
+  4.800 ns (0 allocations: 0 bytes)
+  0.001 ns (0 allocations: 0 bytes)
+set special fields on struct then BitStruct ENTER: 
+  13.714 ns (0 allocations: 0 bytes)
+  0.001 ns (0 allocations: 0 bytes)
+set 2 fields on struct then BitStruct (large struct) ENTER:
+  5.000 ns (0 allocations: 0 bytes)
+the statements executed by set2fields run, if executed directly
+Calling set2fields(bs) causes a crash
+  0.001 ns (0 allocations: 0 bytes)
+b1 set field in loop by /= ENTER:
+  3.100 ns (0 allocations: 0 bytes)
+b2 set field in loop by set(..) ENTER:
+  2.800 ns (0 allocations: 0 bytes)
+struct/BitStruct: access 4 fields in a loop ENTER: 
+  122.148 ns (0 allocations: 0 bytes)
+  115.060 ns (0 allocations: 0 bytes)
+struct/BitStruct: write 4 fields in a loop ENTER:
+  198.515 ns (0 allocations: 0 bytes)
+  267.791 ns (0 allocations: 0 bytes)
+struct/BitStruct: access 4 fields in a loop, large struct ENTER: 
+  121.452 ns (0 allocations: 0 bytes)
+  177.317 ns (0 allocations: 0 bytes)
+struct/BitStruct: write 4 fields in a loop, large struct ENTER:
+  198.833 ns (0 allocations: 0 bytes)
+  265.559 ns (0 allocations: 0 bytes)
+struct/BitStruct: access 4 fields, direct code ENTER:
+  2.200 ns (0 allocations: 0 bytes)
+  0.001 ns (0 allocations: 0 bytes)
+function parameter benchmark: struct/structWithCopy/BitStruct/parameterlist ENTER:
+  10.310 ns (0 allocations: 0 bytes)
+  3.112 μs (17 allocations: 1.38 KiB)
+  12.513 ns (0 allocations: 0 bytes)
+  137.413 ns (0 allocations: 0 bytes)
+
+julia> 
+
