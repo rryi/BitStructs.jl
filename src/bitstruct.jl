@@ -96,24 +96,27 @@ The applicable method may be too new: running in world age 29624, while current 
 Closest candidates are: 
   typemax(::Type{ProcStatus}) at Enums.jl:197 (method too new to be called from this world context.)
 """
-@generated function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+function _fielddescr end
+#=
+function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
     idx = 1
     while idx <= length(syms)
         type = types[idx]
-        bits = Int(Base.invokelatest(bitsizeof,type)) # bitsizeof must be recursively defined with invokelatest!!!
-        #bits = bitsizeof(type)
+        #bits = Int(Base.invokelatest(bitsizeof,type)) # bitsizeof must be recursively defined with invokelatest!!!
+        bits = bitsizeof(type)
         if syms[idx]===s
-            return :(($type,$shift,$bits))
+            # @generated: return :(($type,$shift,$bits))
+            return type,shift,bits
         end
         shift += bits
         idx += 1
     end
     throw(ArgumentError(s)) 
 end
-
+=#
 
 # constant propagation did work in this recursive formulation, but is fragile ... 
 # some changes later, it was lost
@@ -158,7 +161,7 @@ per field of BitStruct{T}, causing some initialization overhead,
 and consuming some RAM. But these methods are very short, resource
 consumption is neglible.
 
-#How does it work? 
+# How does it work? 
 
 The basic idea of a BitStruct field is: it is 
 a sequence of bits in an UInt64. Reading a BUInt{N} field of a BitStruct
@@ -170,36 +173,48 @@ are computed once in the specialize call, and used as constants in code generati
 
 Without this specialization, the bitmask parameters of a field are computed
 at runtime, in every call, including a sequential search for the field name
-in the field name list. 
+in the field name list, bounds checks, maybe complex computation to determine 
+the size in bits of a field.
 
-Julias compiler is already very smart in what
-is called constant propagation, but has a priority on safety. It will not do
-optimizations if it cannot prove its preconditions. One of them is, that
+Julias compiler is already very smart in what is called constant propagation, 
+but has a priority on safety. It will not do optimizations if it cannot prove 
+its preconditions. There are some "compiler switches" for more aggressive
+optimization, like Base.@pure, but they are at risk. One of them is, that
 a pure function must not be redefined: it has to return the same value for
 the same set of parameters forever. But in julia, everyone can redefine every
 (generic) function at any time, including BitStruct.bitsizeof which is at
-core of bitfield parameter computation.
+core of bitfield parameter computation. 
 
-Function specialize assumes bitsizeof is pure for all methods of it which
-have a field type of the BitStruct type given as parameter to specialize,
-and does optimize accordingly.
+Function specialize has a precondition: it requires that bitsizeof returns
+the same result for a type used as field type in BitStruct{T}, 
+during the time period from the specialize call, until
+package BitStructs is recompiled. Given this condition, it calculates
+bitfields parameters for all fields of BitStruct{T}, and generates methods
+for each field, using computed bitfield parameters as constants.
+In other words: it does constant propagation itself, with relaxed 
+preconditions, compared to those julia compiler needs.
 """
-function specialize(::Type{BitStruct{T}}) where {T}
+function specialize(::Type{BitStruct{T}};getter::Bool=false,setter::Bool=false) where {T}
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
     idx = 1
+    btype = BitStruct{T}
     while idx <= length(syms)
-        sym = syms[i]
+        sym = syms[idx]
         type = types[idx]
         bits = bitsizeof(type)
         # now we know the bitfield parameters of field sym.
         # we generate _fielddescr method:
-        ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
-        return ($(esc(type)), $shift, $bits)
+        #ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
+        #return ($(esc(type)), $shift, $bits)
+        strsym=string(sym)
+        ex = :(function _fielddescr(::Type{$btype}, ::Val{Symbol($strsym)}) 
+        return ($type, $shift, $bits)
         end)
         println("about to compile: ",ex)
         eval(ex) # this compiles the specialized function
+        
         shift += bits
         idx += 1
     end
@@ -207,11 +222,6 @@ function specialize(::Type{BitStruct{T}}) where {T}
 end
 
 
-
-@inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
-    return decode(type,_get(reinterpret(UInt64,x),shift,bits))
-end
 
 
 function Base.show(x::BitStruct{T}) where T<:NamedTuple
@@ -282,6 +292,142 @@ function setm2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
         ret = _set(ret,Val(shift),Val(bits),v)
     end
     return reinterpret(BitStruct{T},ret)
+end
+
+
+## overloaded operators
+
+
+@inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
+    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
+    return decode(type,_get(reinterpret(UInt64,x),shift,bits))
+end
+
+
+"""
+    bs::BitStruct{T}   /   (fld,value)::Tuple{Symbol,Any}
+
+
+fld must be a property of BitStruct{T} (a symbol contained in T, identifying a field).
+The operation / replaces the bitfield fld in bs with value and returns the result.
+
+In addition, the syntax ´bs /= fld,value´ is supported for a variable bs of 
+type BitStruct{T}, it stores the result in bs.
+"""
+@inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
+    set(x,t[1],t[2])
+end
+
+
+"""
+    x::BitStruct{T}   |   fld::Symbol
+
+fld must be a property of BitStruct{T} (a symbol contained in T, identifying a field).
+
+Operation | sets all bits in bitfield fld to 1. Its primary use is to set a Bool
+bitfield to true. The following syntax variants are supported
+
+´x |= fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+
+´x | fld1 | fld2 | ... | fldn´ sets all bits in all specified fields fld1..fldn
+
+**WARNING** a bitfield value with all bits set is probably undefined, causing 
+severe errors on an attempt to decode such a bitfield value to its external 
+representation.
+
+Operation | is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types. It is **NOT ** safe for most Enum types, 
+Float16, Float32 and probably user-defined bitfield types.
+"""
+@inline function Base.:(|)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
+    # todo
+end
+
+"""
+    x::BitStruct{T}   |   y::BitStruct{T}
+
+Computes a BitStruct{T} as bitwise OR of x and y. Its primary use is to 
+test if at least one flag bitfield of Type Bool is set. If x is theBitStruct 
+to test, and y is given by ´y = BitStruct{T}() | fld1|fld2|...|fldn´, then
+the expression ´x|y != BitStruct{T}()´ is true, if x has a bit set in any of
+the bilfields fld1..fldn. 
+
+**WARNING** a bitfield value with all bits set is probably undefined, causing 
+severe errors on an attempt to decode such a bitfield value to its external 
+representation.
+
+Operation | is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types. It is **NOT ** safe for most Enum types, 
+Float16, Float32 and probably user-defined bitfield types.
+"""
+@inline function Base.:(|)(x::BitStruct{T},y::BitStruct{T}) where {T<:NamedTuple}
+    # todo
+end
+
+
+"""
+    x::BitStruct{T}   &   fld::Symbol
+
+fld must be property of BitStruct{T} (a symbol contained in T, identifying a field).
+
+Operation & sets all bits in bitfield fld to 0. Its primary use is to set a Bool
+bitfield to false. The following syntax variants are supported
+
+´x &= fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+
+´x & fld1 & fld2 & ... & fldn´ clears all bits in all specified fields fld1..fldn
+
+**WARNING** a bitfield value of 0 ( all bits unset) might be undefined, causing 
+severe errors on an attempt to decode such a bitfield value to its external 
+representation.
+
+Operation & is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types, and Enums. For character types, its result is 
+a control character with code 0, it might confuse C functions for strings, 
+which rely on zero-terminated strings.
+"""
+@inline function Base.:(&)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
+    # todo
+end
+
+"""
+    x::BitStruct{T}   &   y::BitStruct{T}
+
+Computes a BitStruct{T} as bitwise AND of x and y. Its primary use is to 
+test if all values of a set of bitfields of Type Bool are true. If x is the BitStruct 
+to test, and y is given by ´y = BitStruct{T}() | fld1|fld2|...|fldn´, then
+the expression ´x&y ==y´ is true, iff x has all bits set in any of
+the bitfields fld1..fldn. 
+
+**WARNING** even if x and y are proper BitField values, x&y might contain 
+undefined bitfields.
+
+Operation & is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types. It is **NOT ** safe for most Enum types, 
+Float16, Float32 and probably user-defined bitfield types.
+"""
+@inline function Base.:(&)(x::BitStruct{T},y::BitStruct{T}) where {T<:NamedTuple}
+    # todo
+end
+
+
+
+"""
+    ~ x::BitStruct{T}
+
+Inverts all bits of x which belong to bitfields (bits in the unterlying 
+primitive 64 bit value which are not part of a bitfield are not changed). 
+Its primary use is generation of masks for subsequent | and & operations. 
+
+**WARNING** for a valid BitStruct x, ~x can have invalid bitfields.
+
+Operation ~ is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types. It is **NOT ** safe for most Enum types, 
+Float16, Float32 and probably user-defined bitfield types, which can have
+invalid values in ~x for a valid x.
+"""
+@inline function Base.:(~)(x::BitStruct{T}) where {T<:NamedTuple}
+    # todo
 end
 
 
