@@ -64,6 +64,14 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
     delta2 :: BInt{9} # -256..255 
 end
 
+
+@code_native BitStructs._fielddescr(BS,Val(:status))
+
+specialize(BS)
+
+@code_native BitStructs._fielddescr(BS,Val(:status))
+
+
 """
 This struct has fields with the same names as BS and field types
 compatible to the types in BS with the smallest size available in
@@ -283,6 +291,7 @@ Base.copy(x::T) = T([getfield(x, k) for k ∈ fieldnames(T)]...)
     flag1::Bool
     flag2::Bool
 end
+specialize(BT)
 
 t = T(5%UInt16, 6%UInt16, true, false)
 bt = BT(5%UInt16, 6%UInt16, true, false)

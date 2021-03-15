@@ -83,7 +83,8 @@ bitsizeof(::Type{Latin1Char}) = 8
 
 function bitsizeof(::Type{T}) where T<: Enum 
     # use "new world" in all function calls
-    8*sizeof(Int) - leading_zeros(Int(Base.invokelatest(typemax,T))-Int(Base.invokelatest(typemin(T))))
+    # 8*sizeof(Int) - leading_zeros(Int(Base.invokelatest(typemax,T))-Int(Base.invokelatest(typemin(T))))
+    8*sizeof(Int) - leading_zeros(Int(typemax(T))-Int(typemin(T)))
 end
 
 "throw an error if v used more that its lowest *bits* bits"
