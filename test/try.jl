@@ -1,11 +1,84 @@
 using BitStructs
 
 
+module M
+
+function bitsizeof(::Type{T}) where T<: Enum 
+    # use "new world" in all function calls
+    8*sizeof(Int) - leading_zeros(Int(Base.invokelatest(typemax,T))-Int(Base.invokelatest(typemin,T)))
+end
+
+#=
+@generated function f(::Type{T},::Val{s}) where {T<:Enum , s}
+    sTransformed = s # just for demo. In real application, a time consuming but pure calculation
+    bits = Int(Base.invokelatest(bitsizeof,T)) 
+    return :(($T,$bits,sTransformed))
+end
+export f
+=#
+
+function g(::Type{T},::Val{s}) where {T<:Enum , s}
+    sTransformed = s # just for demo. In real application, a time consuming but pure calculation
+    bits = Int(Base.invokelatest(bitsizeof,T)) 
+    println("T = ",T)
+    ex = :(function Base.reinterpret(::Type{T}, ::Val{s}) where {T <: Enum, s}
+    return (T, $bits, $sTransformed)
+    end)
+    #tModule = getfield(Main,:Main)
+    #println(dump(tModule)
+    #Core.eval(tModule,ex)
+    eval(ex)
+    println("eval done")
+    return ex
+end
+export g
+
+end # module M
+
+module Appusing
+using Main.M
+@enum MyEnum ::Int8 first = -5 mid = 0 last=5
+g(MyEnum,Val(mid))
+end # module app
+
+# in application (another module)
+using Main.M
+using Main.App
+
+App.f(App.MyEnum,Val(:nix))
+
+
+
+
+
 NT = @NamedTuple{ f1::Bool, f2:: BUInt{1}, i1::BUInt{6}, i2::BInt{8}, i3::UInt8, i4::Int8, u16::UInt16, i16::Int16}
 const BS = BitStruct{NT}
 
 bs = BS(;i1=5,i3=8)
 
+
+#= isdefined to check on world age problem
+
+function CreateMatrix(Ncount;Plot=true)
+    TheMatrix = fill(0.0,Ncount,Ncount)
+
+    if Plot
+        if isdefined(Main, :PyPlot)
+            println("PyPlot already loaded")
+            PyPlot.figure()
+            PyPlot.imshow(abs.(TheMatrix))
+            PyPlot.colorbar()
+        else
+            println("PyPlot loading PyPlot")
+            @eval using PyPlot
+            Base.invokelatest(PyPlot.figure)
+            Base.invokelatest(PyPlot.imshow, abs.(TheMatrix))
+            Base.invokelatest(PyPlot.colorbar)
+        end
+    end
+    return TheMatrix
+end
+=#
 
 
 s="""
@@ -30,13 +103,14 @@ Meta.parse(s)
 
 
 s=
-"""
-@inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
-    return _convert(type,_get(reinterpret(UInt64,x),shift,bits))
-end
+"""function f(::Type{T},::Val{s}) where {T<:Enum , s}
+    sTransformed = s # just for demo. In real application, a time consuming but pure calculation
+    bits = Int(Base.invokelatest(bitsizeof,T)) 
+    return (T,bits,sTransformed)
+end"""
 
-"""
+s=
+"""f(::Type{T},::Val{s}) where {T<:Enum , s} = (T,:bits,:sTransformed)"""
 
 
 s=
