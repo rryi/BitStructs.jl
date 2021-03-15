@@ -117,21 +117,21 @@ function workOnS end
 function subWorkOnS end
 
 
-@noinline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
+@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
     v1[1] = v2[1] # just to force use of v1,v2 
     if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
         s /= (:bit1,-1)
         s /= :delta1, 15 - s.delta1 
     else
         s /= :bit1,0
-        s /= delta2, 51 - s.delta2
+        s /= :delta2, 51 - s.delta2
     end
     v2[2] = v1[2]
     s /= :id2, (s.id2 - s.id1 + s.delta2)
     return subWorkOnS(v1,v2,s)
 end
 
-@noinline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
+@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
     v2[1] = v1[3] # just to force use of v1,v2 
     if s.bit1==-1
         s /= :id1, abs(s.delta1 - s.delta2) %UInt64
@@ -149,7 +149,21 @@ end
 end
 
 
-@noinline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
+@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
+    v1[1] = v2[1] # just to force use of v1,v2 
+    if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
+        s.bit1 = -1
+        s.delta1 = 15 - s.delta1 
+    else
+        s.bit1 = 0
+        s.delta2 = 51 - s.delta2
+    end
+    v2[2] = v1[2]
+    s.id2 = (s.id2 - s.id1 + s.delta2)
+    return subWorkOnS(v1,v2,s) 
+end
+
+@inline function workOnScopy(v1::Vector{Int}, v2::Vector{Int}, s::S)
     v1[1] = v2[1] # just to force use of v1,v2 
     if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
         s.bit1 = -1
@@ -165,7 +179,7 @@ end
 
 
 
-@noinline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
+@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
     v2[1] = v1[3] # just to force use of v1,v2 
     if s.bit1==-1
         s.id1 = abs(s.delta1 - s.delta2) %UInt64
@@ -184,7 +198,7 @@ end
 
 
 
-@noinline function workOnS(v1::Vector{Int}, v2::Vector{Int}, 
+@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, 
     s_status :: ProcStatus,
     s_strange :: Strange,
     s_sign :: Float16,
@@ -202,21 +216,19 @@ end
 
     v1[1] = v2[1] # just to force use of v1,v2 
     if (s_flag1 || s_flag2) && (s_flag3 || s_flag4)
-        s_bit1 = -1
-        s_delta1 = 15 - s_delta1 
+        s_bit1 = -1 %Int8
+        s_delta1 = (15 - s_delta1 )%Int16
     else
-        s_bit1 = 0
-        s_delta2 = 51 - s_delta2
+        s_bit1 = 0%Int8
+        s_delta2 = (51 - s_delta2) %Int16
     end
     v2[2] = v1[2]
     s_id2 = (s_id2 - s_id1 + s_delta2)
-    return subWorkOnS(v1,v2,copy(s))
+    return subWorkOnS(v1,v2,s_status,s_sign,s_bit1,s_id1,s_delta1,s_delta2)
 end
 
 
-
-
-@noinline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, 
+@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, 
     s_status :: ProcStatus,
     s_sign :: Float16,
     s_bit1  :: Int8,
@@ -247,9 +259,9 @@ v2 = [4,5,6]
 s = S(S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
 bs = BS(S_RUNNING,BIGMINUS,-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
 
-show(s)
+#show(s)
 
-show(bs)
+#show(bs)
 
 
 
@@ -295,6 +307,7 @@ prompt("struct/BitStruct field access in @noinline function")
         s.id1 = s.id2
         s.flag1 = s.flag2
     end
+    return s
 end
 
 
@@ -304,6 +317,27 @@ prompt("set 2 fields on struct then BitStruct")
 @btime set2fields($bt)
 
 
+@noinline function setSpecialfields(s,s2)
+    if typeof(s) <: BitStruct
+        s /= :status, s2.status
+        s /= :strange, s2.strange
+        s /= :sign, s2.sign
+    else
+        s.status = s2.status
+        s.strange = s2.strange
+        s.sign = s2.sign
+    end
+    return s
+end
+
+
+sc = copy(s)
+s2 = copy(s)
+prompt("set special fields on struct then BitStruct")
+@btime setSpecialfields($sc,$s2)
+@btime setSpecialfields($bs,$bs)
+
+
 sc = copy(s)
 prompt("set 2 fields on struct then BitStruct (large struct)")
 @btime set2fields($sc)
@@ -311,12 +345,12 @@ prompt("set 2 fields on struct then BitStruct (large struct)")
 println("the statements executed by set2fields run, if executed directly")
 bs /= :id1, s.id2
 bs /= :flag1,bs.flag2
-show(bs)
+#show(bs)
 println("Calling set2fields(bs) causes a crash")
 set2fields(bs)
 # !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
 #set2fields(bs)
-#@btime set2fields($bs)
+@btime set2fields($bs)
 # drill down on time consume setting a field
 
 
@@ -398,7 +432,7 @@ prompt("struct/BitStruct: write 4 fields in a loop")
 @btime bench2($tv)
 #crash!
 #bench2(btv)
-#@btime bench2($btv)
+@btime bench2($btv)
 
 
 
@@ -420,7 +454,7 @@ prompt("struct/BitStruct: write 4 fields in a loop, large struct")
 @btime bench2($sv)
 #crash!
 #bench2(bsv)
-#@btime bench2($bsv)
+@btime bench2($bsv)
 
 
 
@@ -438,12 +472,13 @@ prompt("struct/BitStruct: access 4 fields, direct code")
 
 
 ## function parameter list benchmark
-prompt("function parameter benchmark: struct/BitStruct/parameterlist")
+prompt("function parameter benchmark: struct/structWithCopy/BitStruct/parameterlist")
 @btime workOnS($v1,$v2,$s)
+@btime workOnScopy($v1,$v2,$s)
 #crash!
 #workOnS(v1,v2,bs)
-#@btime workOnS($v1,$v2,$bs)
+@btime workOnS($v1,$v2,$bs)
 
 @btime workOnS($v1,$v2,S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
-
+nothing
 

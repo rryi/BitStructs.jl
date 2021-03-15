@@ -74,13 +74,17 @@ function bitsizeof end
 bitsizeof(::Type{BInt{N}}) where N = N
 bitsizeof(::Type{BUInt{N}}) where N = N
 bitsizeof(::Type{Bool}) = 1
-@inline bitsizeof(::Type{T}) where T<: Enum = 8*sizeof(Int) - leading_zeros(Int(typemax(T))-Int(typemin(T)))
+#@inline bitsizeof(::Type{T}) where T<: Enum = 8*sizeof(Int) - leading_zeros(Int(typemax(T))-Int(typemin(T)))
+
 
 bitsizeof(::Type{T}) where T<: Union{UInt8,UInt16,UInt32,Int8,Int16,Int32,Float16,Float32,Char} = 8*sizeof(T)
 bitsizeof(::Type{AsciiChar}) = 7
 bitsizeof(::Type{Latin1Char}) = 8
 
-
+function bitsizeof(::Type{T}) where T<: Enum 
+    # use "new world" in all function calls
+    8*sizeof(Int) - leading_zeros(Int(Base.invokelatest(typemax,T))-Int(Base.invokelatest(typemin(T))))
+end
 
 "throw an error if v used more that its lowest *bits* bits"
 function checkbitsize(v::UInt64,bits) 

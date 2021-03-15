@@ -1,4 +1,6 @@
-commit
+commit benchmarks with @generated
+f1a4118
+
 
 struct/BitStruct simple field access ENTER: 
   3.100 ns (0 allocations: 0 bytes)
@@ -43,4 +45,10 @@ function parameter benchmark: struct/structWithCopy/BitStruct/parameterlist ENTE
   137.413 ns (0 allocations: 0 bytes)
 
 julia> 
+
+BitStruct vs struct:
+
+ - field read access on par
+ -  field write access 35% slower
+ - method params test 1000% (ten times!!) faster
 

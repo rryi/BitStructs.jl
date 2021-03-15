@@ -83,19 +83,28 @@ end
 extract field descriptor (type,shift,bits) from type info for a symbol S.
 If S is not found, (Nothing,0,0) is returned.
 
-This function is slow, even with multiple dispatch. It is replaced at
-compile time by @BitStruct which generates specialized fast methods, 
+This function suffers from "new method in old world" problem: any type defined after its first use
+will cause an exception if the type is used in a BitStruct. Besides that, it is ultrafast,
 returning a constant
+
+workaround for benchmarking: change this code after defining all types.
+automatic recompile will fix it for that run.
+
+bitsizeof on Enum uses typemax, seems invokelatest is not recursive wrt world.
+ERROR: LoadError: MethodError: no method matching typemax(::Type{ProcStatus})
+The applicable method may be too new: running in world age 29624, while current world is 29656.
+Closest candidates are: 
+  typemax(::Type{ProcStatus}) at Enums.jl:197 (method too new to be called from this world context.)
 """
-@generated function __fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+@generated function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
     idx = 1
     while idx <= length(syms)
         type = types[idx]
+        bits = Int(Base.invokelatest(bitsizeof,type)) # bitsizeof must be recursively defined with invokelatest!!!
         #bits = bitsizeof(type)
-        bits = Int(Base.invokelatest(bitsizeof,type))
         if syms[idx]===s
             return :(($type,$shift,$bits))
         end
@@ -108,9 +117,9 @@ end
 
 # constant propagation did work in this recursive formulation, but is fragile ... 
 # some changes later, it was lost
+# even worse: crash due to compiler confusion caused by strange tuple type Tuple{:a,:b...}
 
-
-@inline function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s}
+@inline function __fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s}
     _fielddescr(Tuple{T.parameters[1]...}, T.parameters[2],Val(s),0)
 end
 
@@ -124,6 +133,79 @@ end
         _fielddescr(Base.tuple_type_tail(syms),Base.tuple_type_tail(types),Val(s),shift+bitsizeof(type))
     end
 end
+
+
+"""
+    specialize(::Type{BitStruct{T}})
+
+Specializes field access methods for BitStruct{T}, they are redefined as
+optimized, inlined methods. It gives a dramatic performance boost 
+(about factor 1000) for BitStruct field access methods.
+
+Call it if runtime performance has any relevance for your application.
+Call it once, immediately after BitStruct type creation.
+    
+: they compile down to a bare >> and & operation, even beating 
+access speed of a mutable struct field access.
+Call it if runtime performance has any relevance for your application.
+Call it once, immediately after BitStruct type creation.
+
+Precondition: all field types of BitStruct{T} must be already defined, including
+methods encode, decode, bitsizeof for all field types used in BitStruct{T}.
+
+Any reasons not to call it? Not really. Well, it compiles 3 methods 
+per field of BitStruct{T}, causing some initialization overhead, 
+and consuming some RAM. But these methods are very short, resource
+consumption is neglible.
+
+#How does it work? 
+
+The basic idea of a BitStruct field is: it is 
+a sequence of bits in an UInt64. Reading a BUInt{N} field of a BitStruct
+is nothing more than a SHIFT operation >> and an AND operation & on the 
+BitStruct binary value, an UInt64. They will almost always be applied to a 
+CPU register variable, each consuming typically 1 CPU cycle, no memory access. 
+With a call to specialize, the BitStruct field specific parameters for SHIFT and AND
+are computed once in the specialize call, and used as constants in code generation.
+
+Without this specialization, the bitmask parameters of a field are computed
+at runtime, in every call, including a sequential search for the field name
+in the field name list. 
+
+Julias compiler is already very smart in what
+is called constant propagation, but has a priority on safety. It will not do
+optimizations if it cannot prove its preconditions. One of them is, that
+a pure function must not be redefined: it has to return the same value for
+the same set of parameters forever. But in julia, everyone can redefine every
+(generic) function at any time, including BitStruct.bitsizeof which is at
+core of bitfield parameter computation.
+
+Function specialize assumes bitsizeof is pure for all methods of it which
+have a field type of the BitStruct type given as parameter to specialize,
+and does optimize accordingly.
+"""
+function specialize(::Type{BitStruct{T}}) where {T}
+    shift = 0
+    types = T.parameters[2].parameters
+    syms = T.parameters[1]
+    idx = 1
+    while idx <= length(syms)
+        sym = syms[i]
+        type = types[idx]
+        bits = bitsizeof(type)
+        # now we know the bitfield parameters of field sym.
+        # we generate _fielddescr method:
+        ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
+        return ($(esc(type)), $shift, $bits)
+        end)
+        println("about to compile: ",ex)
+        eval(ex) # this compiles the specialized function
+        shift += bits
+        idx += 1
+    end
+    return nothing
+end
+
 
 
 @inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
