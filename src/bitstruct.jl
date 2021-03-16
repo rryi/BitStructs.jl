@@ -374,55 +374,69 @@ end
 
 
 """
-    x::BitStruct{T}   |   fld::Symbol
+    x::BitStruct{T}   +   fld::Symbol
 
 fld must be a property of BitStruct{T} (a symbol contained in T, identifying a field).
 
-Operation | sets all bits in bitfield fld to 1. Its primary use is to set a Bool
-bitfield to true. The following syntax variants are supported
+Operation + sets all bits in bitfield fld to 1. Its primary use is to set a Bool
+bitfield to true. For bitfield types other than Bool, please double check its use.
+It has **nothing** in common with an arithmetic addition, it is more a set-like
+union or inclusion. 
 
-´x |= fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+The following syntax variants are supported
 
-´x | fld1 | fld2 | ... | fldn´ sets all bits in all specified fields fld1..fldn
+´x += fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+
+´x + fld1 + fld2 + ... + fldn´ sets all bits in all specified fields fld1..fldn
 
 **WARNING** a bitfield value with all bits set is probably undefined, causing 
 severe errors on an attempt to decode such a bitfield value to its external 
 representation.
 
-Operation | is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+Operation + is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
 and all primitive Integer types. It is **NOT ** safe for most Enum types, 
 Float16, Float32 and probably user-defined bitfield types.
 """
-@inline function Base.:(|)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
+@inline function Base.:(+)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
     type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
-    return reinterpret(BitStruct{T},reinterpret(UInt64,x)| _mask(type) << bits)
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x)| (_mask(bits) << shift))
 end
 
 
 """
-    x::BitStruct{T}   &   fld::Symbol
+    x::BitStruct{T}   -   fld::Symbol
 
 fld must be property of BitStruct{T} (a symbol contained in T, identifying a field).
 
-Operation & sets all bits in bitfield fld to 0. Its primary use is to set a Bool
-bitfield to false. The following syntax variants are supported
+Operation - sets all bits in bitfield fld to 0. Its primary use is to set a Bool
+bitfield to false. Carefully check any use for non-Bool bitfields. It has 
+**nothing** to do with a arithmetic sub traction, it is more like a set difference,
+if you think of a BitStruct as a set of bits, in this interpretation
+the symbol parameter is a subset containing all bis used by the bitfield.  
 
-´x &= fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+The following syntax variants are supported
 
-´x & fld1 & fld2 & ... & fldn´ clears all bits in all specified fields fld1..fldn
+´x -= fld´ stores the result in x. Requires x is a variable of type BitStruct{T}.
+
+´x - fld1 - fld2 - ... - fldn´ clears all bits in all specified fields fld1..fldn
 
 **WARNING** a bitfield value of 0 ( all bits unset) might be undefined, causing 
 severe errors on an attempt to decode such a bitfield value to its external 
 representation.
 
-Operation & is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
-and all primitive Integer types, and Enums. For character types, its result is 
-a control character with code 0, it might confuse C functions for strings, 
-which rely on zero-terminated strings.
+Operation & is safe for most bitfield types,in particulart Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types, and Enums. It sets the bitfield value to 0,
+for all predefined numeric bitfield types with an external type t it results
+in zero(t), including Float16 and Float32. 
+
+For enum types t, field access returns typemin(t).
+
+For character types, its result is a control character with code 0, it might 
+confuse C functions for strings, which rely on zero-terminated strings. 
 """
-@inline function Base.:(&)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
+@inline function Base.:(-)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
     type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
-    return reinterpret(BitStruct{T},reinterpret(UInt64,x) & _mask(type) << bits)
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x) & ~(_mask(bits) << shift))
 end
 
 
