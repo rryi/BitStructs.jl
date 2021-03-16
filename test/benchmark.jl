@@ -1,5 +1,8 @@
 using BitStructs
+using Random
 using BenchmarkTools
+
+rng = MersenneTwister(1234);
 
 #=
 module BitStructs
@@ -65,7 +68,7 @@ for memory efficiency (Strange,Sign), demonstrating how a custom encoding can ov
 end
 
 
-@code_native BitStructs._fielddescr(BS,Val(:status))
+#@code_native BitStructs._fielddescr(BS,Val(:status))
 
 specialize(BS)
 
@@ -326,7 +329,7 @@ prompt("set 2 fields on struct then BitStruct")
 @btime set2fields($bt)
 
 
-@noinline function setSpecialfields(s,s2)
+@noinline function setSpecialfields(s::T,s2::T) where T <: Union{S,BS}
     if typeof(s) <: BitStruct
         s /= :status, s2.status
         s /= :strange, s2.strange

@@ -221,20 +221,83 @@ function specialize(::Type{BitStruct{T}};getter::Bool=false,setter::Bool=false) 
     return nothing
 end
 
+#=
+"""
+longtype(BitStruct{T})
 
+return the full type definition in 1-line macro format for print/show/dump
 
-
-function Base.show(x::BitStruct{T}) where T<:NamedTuple
-    ps = reinterpret(UInt64,x)
-    println(BitStruct{T}, ' ',repr(ps))
+"""
+=#
+function Base.string(::Type{BitStruct{T}}) where T<:NamedTuple
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
-    for s in syms
-        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+    io = IOBuffer()
+    print(io,"BitStruct{")
+    for i in 1:length(syms)
+        s = syms[i]
+        t = types[i]
+        delim = i==length(syms) ? '}' : ','
+        print(io,s, ":",t,delim)
+    end
+    return String(take!(io))
+end
+
+
+function Base.string(x::BitStruct{T}) where T<:NamedTuple
+    types = Tuple(T.parameters[2].parameters)
+    syms = T.parameters[1]
+    io = IOBuffer()
+    print(io,string(BitStruct{T}),'(')
+    for i in 1:length(syms)
+        delim = i==length(syms) ? ')' : ','
+        print(io,getproperty(x,syms[i]),delim)
+    end
+    #close(io)
+    return String(take!(io))
+end
+
+# elaborated version
+function Base.show(io::IO, ::MIME"text/plain", x::BitStruct{T}) where T<:NamedTuple
+    ps = reinterpret(UInt64,x)
+    println(io, "BitStruct(",repr(ps),')')
+    #types = Tuple(T.parameters[2].parameters)
+    syms = T.parameters[1]
+    for i in 1:length(syms)
+        s = syms[i]
+        #t = types[i]
         #println("  ",s, "::",t, " , ",shift," , ",bits)
-        println("  ",s, "::",t, " = ",repr(decode(t,_get(ps,shift,bits))))
+        v = getproperty(x,s)
+        println("  ",s, ":",typeof(v),' ',repr(getproperty(x,s)))
     end
     println("end")
+end
+
+# short 1-liner
+function Base.show(io::IO, x::BitStruct{T}) where T<:NamedTuple
+    print(io,string(x))
+end
+
+
+function Base.dump(io::IOContext, x::BitStruct{T}, n::Int, indent) where T <: NamedTuple
+    ps = reinterpret(UInt64,x)
+    types = Tuple(T.parameters[2].parameters)
+    syms = T.parameters[1]
+    println(io, "BitStruct(",repr(ps),')')
+    if n >0 # no pointers in BitStruct ==> no check of circular structures necessary
+        #recur_io = IOContext(io, Pair{Symbol,Any}(:SHOWN_SET, x))
+        indent2 = string(indent,"  ")
+        for s in syms
+            #property
+            #println("  ",s, "::",t, " , ",shift," , ",bits)
+            t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+            v = getproperty(x,s)
+            print(io,indent2,s," [",shift+1,':',shift+bits,"::",t, "]: ")
+            Base.dump(io, v,n-1,indent2)
+            println(io)
+        end
+    end
+    nothing
 end
 
 
@@ -251,15 +314,6 @@ replace field s in ps by v.
     return reinterpret(BitStruct{T},ret)
 end
 
-
-"""
-    set(ps::BitStruct{T};s::Symbol,v)
-
-replace field s in ps by v.
-"""
-@inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
-    set(x,t[1],t[2])
-end
 
 """
     set(ps::BitStruct{T};kwargs...)
@@ -340,28 +394,8 @@ and all primitive Integer types. It is **NOT ** safe for most Enum types,
 Float16, Float32 and probably user-defined bitfield types.
 """
 @inline function Base.:(|)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    # todo
-end
-
-"""
-    x::BitStruct{T}   |   y::BitStruct{T}
-
-Computes a BitStruct{T} as bitwise OR of x and y. Its primary use is to 
-test if at least one flag bitfield of Type Bool is set. If x is theBitStruct 
-to test, and y is given by ´y = BitStruct{T}() | fld1|fld2|...|fldn´, then
-the expression ´x|y != BitStruct{T}()´ is true, if x has a bit set in any of
-the bilfields fld1..fldn. 
-
-**WARNING** a bitfield value with all bits set is probably undefined, causing 
-severe errors on an attempt to decode such a bitfield value to its external 
-representation.
-
-Operation | is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
-and all primitive Integer types. It is **NOT ** safe for most Enum types, 
-Float16, Float32 and probably user-defined bitfield types.
-"""
-@inline function Base.:(|)(x::BitStruct{T},y::BitStruct{T}) where {T<:NamedTuple}
-    # todo
+    type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x)| _mask(type) << bits)
 end
 
 
@@ -387,8 +421,32 @@ a control character with code 0, it might confuse C functions for strings,
 which rely on zero-terminated strings.
 """
 @inline function Base.:(&)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    # todo
+    type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x) & _mask(type) << bits)
 end
+
+
+"""
+    x::BitStruct{T}   |   y::BitStruct{T}
+
+Computes a BitStruct{T} as bitwise OR of x and y. Its primary use is to 
+test if at least one flag bitfield of Type Bool is set. If x is theBitStruct 
+to test, and y is given by ´y = BitStruct{T}() | fld1|fld2|...|fldn´, then
+the expression ´x|y != BitStruct{T}()´ is true, if x has a bit set in any of
+the bilfields fld1..fldn. 
+
+**WARNING** a bitfield value with all bits set is probably undefined, causing 
+severe errors on an attempt to decode such a bitfield value to its external 
+representation.
+
+Operation | is safe for bitfield types Bool, BUInt{N}, BInt{N}, 
+and all primitive Integer types. It is **NOT ** safe for most Enum types, 
+Float16, Float32 and probably user-defined bitfield types.
+"""
+@inline function Base.:(|)(x::BitStruct{T},y::BitStruct{T}) where {T<:NamedTuple}
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x) | reinterpret(UInt64,y))
+end
+
 
 """
     x::BitStruct{T}   &   y::BitStruct{T}
@@ -407,7 +465,7 @@ and all primitive Integer types. It is **NOT ** safe for most Enum types,
 Float16, Float32 and probably user-defined bitfield types.
 """
 @inline function Base.:(&)(x::BitStruct{T},y::BitStruct{T}) where {T<:NamedTuple}
-    # todo
+    return reinterpret(BitStruct{T},reinterpret(UInt64,x) & reinterpret(UInt64,y))
 end
 
 
@@ -427,10 +485,9 @@ Float16, Float32 and probably user-defined bitfield types, which can have
 invalid values in ~x for a valid x.
 """
 @inline function Base.:(~)(x::BitStruct{T}) where {T<:NamedTuple}
+    return reinterpret(BitStruct{T},(~reinterpret(UInt64,x)) & _mask(bitsizeof(BitStruct{T})))
     # todo
 end
-
-
 
 
 ## constructors
