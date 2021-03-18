@@ -343,11 +343,27 @@ prompt("set 2 fields on struct then BitStruct")
 end
 
 
+# same, but using direct BitStruct field copy
+@noinline function setSpecialfields2(s::T,s2::T) where T <: Union{S,BS}
+    if typeof(s) <: BitStruct
+        s /= :status, s2
+        s /= :strange, s2
+        s /= :sign, s2
+    else
+        s.status = s2.status
+        s.strange = s2.strange
+        s.sign = s2.sign
+    end
+    return s
+end
+
 sc = copy(s)
 s2 = copy(s)
+bs2 = bs
 prompt("set special fields on struct then BitStruct")
 @btime setSpecialfields($sc,$s2)
-@btime setSpecialfields($bs,$bs)
+@btime setSpecialfields($bs,$bs2)
+@btime setSpecialfields($bs,$bs2)
 
 
 sc = copy(s)
@@ -464,12 +480,59 @@ prompt("struct/BitStruct: access 4 fields in a loop, large struct")
 
 prompt("struct/BitStruct: write 4 fields in a loop, large struct")
 @btime bench2($sv)
-#crash!
-#bench2(bsv)
 @btime bench2($bsv)
 
 
+"write 4 fields in a loop from another struct instance"
+function bench3(vec1, vec2)
+    sum = 0
+    if eltype(vec1) <: BitStruct
+        for i in 2:length(vec1)
+            t = vec1[i]
+            u = vec2[i]
+            t /= :id1, u
+            t /= :id2, u
+            t /= :flag1, u
+            t /= :flag2, u
+            sum += t.id1
+            vec1[i-1] = t
+        end
+    else
+        for i in 2:length(vec1)
+            t = vec1[i]
+            u = vec2[i]
+            t.id1 = u.id1
+            t.id2 = u.id2
+            t.flag1 = u.flag1
+            t.flag2 = u.flag2
+            sum += t.id1
+            vec1[i-1] = t
+        end
+    end
+    sum
+end
+"write 4 fields in a loop from another struct instance standard assignment"
+function bench3a(vec1, vec2)
+    sum = 0
+    for i in 2:length(vec1)
+        t = vec1[i]
+        u = vec2[i]
+        t /= :id1, u.id1
+        t /= :id2, u.id2
+        t /= :flag1, u.flag1
+        t /= :flag2, u.flag2
+        sum += t.id1
+        vec1[i-1] = t
+    end
+    sum
+end
 
+prompt("struct/BitStruct: copy 4 fields from another struct in a loop, large struct struct / BitStruct assign / BitStruct field copy")
+sv2 = copy(sv)
+bsv2 = copy(bsv)
+@btime bench3($sv,sv2)
+@btime bench3a($bsv,$bsv2)
+@btime bench3($bsv,$bsv2)
 
 
 # currently, bad again... no constant propagation.

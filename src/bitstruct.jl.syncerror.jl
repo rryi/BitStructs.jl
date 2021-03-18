@@ -60,7 +60,7 @@ If pstruct and value are interpreted as bit vector, it performs pstruct[shift+1:
 Boundscheck tests if no bit is set in balue except the lowest *bits* bits. 
 This is guaranteed by encode(...,bits).
 """
-@inline function _set(pstruct::UInt64,shift,bits,value::UInt64) 
+function _set(pstruct::UInt64,shift,bits,value::UInt64) 
     @boundscheck checkbitsize(value,bits)
     pstruct &= !(_mask(bits) << shift) # delete bitfield
     pstruct |= value << shift
@@ -212,7 +212,7 @@ function specialize(::Type{BitStruct{T}};getter::Bool=false,setter::Bool=false) 
         ex = :(function _fielddescr(::Type{$btype}, ::Val{Symbol($strsym)}) 
         return ($type, $shift, $bits)
         end)
-        #println("about to compile: ",ex)
+        println("about to compile: ",ex)
         eval(ex) # this compiles the specialized function
         
         shift += bits
@@ -306,7 +306,7 @@ end
 
 replace field s in ps by v.
 """
-@inline function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
+@inline function set(x::BitStruct{T},s::Symbol,v::V) where {T<:NamedTuple,V}
     ret = reinterpret(UInt64,x)
     t,shift, bits = _fielddescr(BitStruct{T},Val(s))
     u = encode(t,v)
@@ -314,8 +314,7 @@ replace field s in ps by v.
     return reinterpret(BitStruct{T},ret)
 end
 
-
-
+/=
 # optimized code when copying a field from another BitStruct instance
 @inline function set(x::BitStruct{T},s::Symbol,v::BitStruct{T}) where {T<:NamedTuple}
     t,shift, bits = _fielddescr(BitStruct{T},Val(s))
@@ -324,8 +323,7 @@ end
     ret = (reinterpret(UInt64,x) & ~mask) | u
     return reinterpret(BitStruct{T},ret)
 end
-
-
+=/
 
 """
     set(ps::BitStruct{T};kwargs...)
@@ -380,7 +378,7 @@ The operation / replaces the bitfield fld in bs with value and returns the resul
 In addition, the syntax ´bs /= fld,value´ is supported for a variable bs of 
 type BitStruct{T}, it stores the result in bs.
 """
-@inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
+@inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,V}) where {T<:NamedTuple, V}
     set(x,t[1],t[2])
 end
 
@@ -418,7 +416,7 @@ end
 """
     x::BitStruct{T}   -   fld::Symbol
 
-fld must be property of BitStruct{T} (a symbol contained in T, identifying a field).
+fld must be a property of BitStruct{T} (a symbol contained in T, identifying a field).
 
 Operation - sets all bits in bitfield fld to 0. Its primary use is to set a Bool
 bitfield to false. Carefully check any use for non-Bool bitfields. It has 
