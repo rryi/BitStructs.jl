@@ -60,7 +60,7 @@ If pstruct and value are interpreted as bit vector, it performs pstruct[shift+1:
 Boundscheck tests if no bit is set in balue except the lowest *bits* bits. 
 This is guaranteed by encode(...,bits).
 """
-function _set(pstruct::UInt64,shift,bits,value::UInt64) 
+@inline function _set(pstruct::UInt64,shift,bits,value::UInt64) 
     @boundscheck checkbitsize(value,bits)
     pstruct &= !(_mask(bits) << shift) # delete bitfield
     pstruct |= value << shift
