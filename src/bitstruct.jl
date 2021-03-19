@@ -194,7 +194,38 @@ for each field, using computed bitfield parameters as constants.
 In other words: it does constant propagation itself, with relaxed 
 preconditions, compared to those julia compiler needs.
 """
-function specialize(::Type{BitStruct{T}};getter::Bool=false,setter::Bool=false) where {T}
+function generate(targetBitStruct::DataType, subBitStruct::DataType, shift::Int, subfields::Bool) where {T}
+    targetBitStruct <: BitStruct && subBitStruct <:
+    btype = 
+    shift = 0
+    types = T.parameters[2].parameters
+    syms = T.parameters[1]
+    idx = 1
+    btype = BitStruct{T}
+    while idx <= length(syms)
+        sym = syms[idx]
+        type = types[idx]
+        bits = bitsizeof(type)
+        # now we know the bitfield parameters of field sym.
+        # we generate _fielddescr method:
+        #ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
+        #return ($(esc(type)), $shift, $bits)
+        strsym=string(sym)
+        ex = :(function _fielddescr(::Type{$targetBitStruct}, ::Val{Symbol($strsym)}) 
+        return ($type, $shift, $bits)
+        end)
+        #println("about to compile: ",ex)
+        eval(ex) # this compiles the specialized function
+        if subfields && type <: BitStruct
+            # generate fields for direkt access to bitfields in type
+
+        shift += bits
+        idx += 1
+    end
+    return nothing
+end
+
+function generate(::Type{BitStruct{T}};subfields::Bool,getter::Bool=false,setter::Bool=false) where {T}
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -214,12 +245,15 @@ function specialize(::Type{BitStruct{T}};getter::Bool=false,setter::Bool=false) 
         end)
         #println("about to compile: ",ex)
         eval(ex) # this compiles the specialized function
-        
+        if subfields && type <: BitStruct
+            # generate fields for direkt access to bitfields in type
+            
         shift += bits
         idx += 1
     end
     return nothing
 end
+
 
 #=
 """
