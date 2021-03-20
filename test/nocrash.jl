@@ -8,7 +8,7 @@ using BitStructs
     id1 :: BUInt{9} # 0..511
     id2 :: BUInt{12} # 0..4095
 end
-specialize(BS)
+BitStructs.generate(BS)
 bs = BS(true,false,0x1,0x2)
 show(bs)
 

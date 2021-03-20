@@ -97,8 +97,9 @@ Closest candidates are:
   typemax(::Type{ProcStatus}) at Enums.jl:197 (method too new to be called from this world context.)
 """
 function _fielddescr end
-#=
-function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s isa Symbol
+
+# generic version. Specialized methods are created by generate(..)
+function _fielddescr(::Type{BitStruct{T}},s::Symbol) where {T<:NamedTuple} 
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -116,32 +117,68 @@ function _fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s} # s 
     end
     throw(ArgumentError(s)) 
 end
-=#
 
-# constant propagation did work in this recursive formulation, but is fragile ... 
-# some changes later, it was lost
-# even worse: crash due to compiler confusion caused by strange tuple type Tuple{:a,:b...}
 
-@inline function __fielddescr(::Type{BitStruct{T}},::Val{s}) where {T<:NamedTuple,s}
-    _fielddescr(Tuple{T.parameters[1]...}, T.parameters[2],Val(s),0)
-end
-
-@inline function _fielddescr(::Type{syms}, ::Type{types},::Val{s},shift::Int) where {syms <: Tuple, types<:Tuple, s} 
-    @inbounds begin
-        syms===Tuple{} && throw(ArgumentError(s))
-        type = Base.tuple_type_head(types)
-        if s===Base.tuple_type_head(syms)
-            return type, shift, bitsizeof(type)
+# recursive implementation
+function _generate(targetType::DataType, bsType::DataType, shift::Int, prefix::String, subfields::Bool) 
+    types = bsType.parameters[1].parameters[2].parameters
+    syms = bsType.parameters[1].parameters[1]
+    idx = 1
+    while idx <= length(syms)
+        sym = syms[idx]
+        type = types[idx]
+        bits = bitsizeof(type)
+        strsym=prefix*string(sym)
+        ex = :(@inline function _fielddescr(::Type{$targetType}, ::Val{Symbol($strsym)}) 
+        return ($type, $shift, $bits)
+        end)
+        #println("about to compile: ",ex)
+        eval(ex) # this compiles the specialized function
+        if subfields && type <: BitStruct
+            # generate also all fields of type as fields of target, with sym * '_' as prefix
+            _generate(targetType,type,shift,strsym*"_",subfields)
         end
-        _fielddescr(Base.tuple_type_tail(syms),Base.tuple_type_tail(types),Val(s),shift+bitsizeof(type))
+        shift += bits
+        idx += 1
     end
+    return nothing
 end
 
 
 """
-    specialize(::Type{BitStruct{T}})
+    generate(bitStruct::Datatype,specialize::Bool=true,subfields::Bool=true)
+    generate(bitStruct::Datatype,bitstructs...;specialize::Bool=true,subfields::Bool=true)
 
-Specializes field access methods for BitStruct{T}, they are redefined as
+*generate* compiles methods for BitStruct types. 
+
+# when and how to use
+
+Calling *generate* is not mandatory, but highly recommended. Many BitStruct
+operations are about factor 1000 (!!!) faster when *generate* is called with
+parameter specialize =true.
+
+*generate* has the following preconditions
+for a call with a bitStruct type as parameter:
+    
+ * *generate* must be called at top level (not inside a function or block)
+ * any type T used as bitfield type inside of type bitStruct must alreeady exist
+ * [`bitsizeof`](@ref)(T) for a type T used in a bitfield type must already exist
+
+As a rule of thumb, define all BitStruct types and their custom bitfield types
+at the beginning of a logical source code unit (a module, or a .jl file included at
+top level), including all bitszizeof method definitions, and then call *generate*.
+
+You should call *generate* before BitStruct instances are created. You **must** call
+*generate* with subfields=true before any subfield access. Subfield access refers to
+the situation where a BitStruct type BT has a field f of another BitStruct type BST,
+and BST has a field f2. If subfield access is generated, you can write 
+x.f_f2 as alternative for x.f.f2 for a x::BT. Subfield access has no shorter 
+source code, but generates shorter and faster native code.
+
+It is called after the BitStruct types used as arguments are defined, including bitsizeof forthose types.  (together with
+methods for bitsizeof, encode and decode)
+
+Specializes field access methods for BitStruct type targetBitStruct usi{T}, they are redefined as
 optimized, inlined methods. It gives a dramatic performance boost 
 (about factor 1000) for BitStruct field access methods.
 
@@ -191,78 +228,31 @@ during the time period from the specialize call, until
 package BitStructs is recompiled. Given this condition, it calculates
 bitfields parameters for all fields of BitStruct{T}, and generates methods
 for each field, using computed bitfield parameters as constants.
-In other words: it does constant propagation itself, with relaxed 
+In other words: it does constant propagation by itself, with relaxed 
 preconditions, compared to those julia compiler needs.
 """
-function generate(targetBitStruct::DataType, subBitStruct::DataType, shift::Int, subfields::Bool) where {T}
-    targetBitStruct <: BitStruct && subBitStruct <:
-    btype = 
-    shift = 0
-    types = T.parameters[2].parameters
-    syms = T.parameters[1]
-    idx = 1
-    btype = BitStruct{T}
-    while idx <= length(syms)
-        sym = syms[idx]
-        type = types[idx]
-        bits = bitsizeof(type)
-        # now we know the bitfield parameters of field sym.
-        # we generate _fielddescr method:
-        #ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
-        #return ($(esc(type)), $shift, $bits)
-        strsym=string(sym)
-        ex = :(function _fielddescr(::Type{$targetBitStruct}, ::Val{Symbol($strsym)}) 
-        return ($type, $shift, $bits)
-        end)
-        #println("about to compile: ",ex)
-        eval(ex) # this compiles the specialized function
-        if subfields && type <: BitStruct
-            # generate fields for direkt access to bitfields in type
+function generate end
 
-        shift += bits
-        idx += 1
-    end
-    return nothing
-end
 
-function generate(::Type{BitStruct{T}};subfields::Bool,getter::Bool=false,setter::Bool=false) where {T}
-    shift = 0
-    types = T.parameters[2].parameters
-    syms = T.parameters[1]
-    idx = 1
-    btype = BitStruct{T}
-    while idx <= length(syms)
-        sym = syms[idx]
-        type = types[idx]
-        bits = bitsizeof(type)
-        # now we know the bitfield parameters of field sym.
-        # we generate _fielddescr method:
-        #ex = :(function _fielddescr(::Type{$(esc(type))}, ::Val{$(esc(sym))}) 
-        #return ($(esc(type)), $shift, $bits)
-        strsym=string(sym)
-        ex = :(function _fielddescr(::Type{$btype}, ::Val{Symbol($strsym)}) 
-        return ($type, $shift, $bits)
-        end)
+function generate(bsType::DataType, subfields::Bool=true, specialize::Bool=true) 
+    bsType <: BitStruct || throw(ArgumentError("Parameters must be a concrete BitStruct type, but is $bsType"))
+    bitsize = bitsizeof(bsType)
+    bitsize <= 64 || throw(ArgumentError("$bsType is invalid - has too many bits (max is 64): $bitsize"))
+    if specialize 
+        _generate(bsType,bsType,0,"",subfields)
+        ex = :(@inline function _fielddescr(::Type{$bsType}, s::Symbol) 
+            return _fielddescr($bsType, Val(s))
+            end)
         #println("about to compile: ",ex)
-        eval(ex) # this compiles the specialized function
-        if subfields && type <: BitStruct
-            # generate fields for direkt access to bitfields in type
-            
-        shift += bits
-        idx += 1
+        eval(ex) # this compiles the specialized function with symbol argument
+    else
+        subfields && throw(ArgumentError("subfield access requires specialize"))
     end
     return nothing
 end
 
 
-#=
-"""
-longtype(BitStruct{T})
 
-return the full type definition in 1-line macro format for print/show/dump
-
-"""
-=#
 function Base.string(::Type{BitStruct{T}}) where T<:NamedTuple
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
@@ -324,7 +314,7 @@ function Base.dump(io::IOContext, x::BitStruct{T}, n::Int, indent) where T <: Na
         for s in syms
             #property
             #println("  ",s, "::",t, " , ",shift," , ",bits)
-            t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+            t,shift, bits = _fielddescr(BitStruct{T},s)
             v = getproperty(x,s)
             print(io,indent2,s," [",shift+1,':',shift+bits,"::",t, "]: ")
             Base.dump(io, v,n-1,indent2)
@@ -342,7 +332,7 @@ replace field s in ps by v.
 """
 @inline function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
-    t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+    t,shift, bits = _fielddescr(BitStruct{T},s)
     u = encode(t,v)
     ret = _set(ret,Val(shift),Val(bits),u)
     return reinterpret(BitStruct{T},ret)
@@ -352,7 +342,7 @@ end
 
 # optimized code when copying a field from another BitStruct instance
 @inline function set(x::BitStruct{T},s::Symbol,v::BitStruct{T}) where {T<:NamedTuple}
-    t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+    t,shift, bits = _fielddescr(BitStruct{T},s)
     mask = _mask(bits) << shift
     u = reinterpret(UInt64,x) & mask
     ret = (reinterpret(UInt64,x) & ~mask) | u
@@ -371,7 +361,7 @@ function setm(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in pairs(kwargs)
         s = p.first
-        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+        t,shift, bits = _fielddescr(BitStruct{T},s)
         v = encode(t,p.second)
         ret = _set(ret,Val(shift),Val(bits),v)
     end
@@ -387,7 +377,7 @@ function setm2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     idx = 1
     while idx <= length(syms)
         s = syms[idx]
-        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+        t,shift, bits = _fielddescr(BitStruct{T},s)
         v = encode(t,nt[idx])
         ret = _set(ret,Val(shift),Val(bits),v)
     end
@@ -399,7 +389,7 @@ end
 
 
 @inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BitStruct{T},Val(s))
+    type,shift,bits = _fielddescr(BitStruct{T},s)
     return decode(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
@@ -444,7 +434,7 @@ and all primitive Integer types. It is **NOT ** safe for most Enum types,
 Float16, Float32 and probably user-defined bitfield types.
 """
 @inline function Base.:(+)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
+    type,shift,bits = _fielddescr(BitStruct{T},fld)
     return reinterpret(BitStruct{T},reinterpret(UInt64,x)| (_mask(bits) << shift))
 end
 
@@ -481,7 +471,7 @@ For character types, its result is a control character with code 0, it might
 confuse C functions for strings, which rely on zero-terminated strings. 
 """
 @inline function Base.:(-)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    type,shift,bits = _fielddescr(BitStruct{T},Val(fld))
+    type,shift,bits = _fielddescr(BitStruct{T},fld)
     return reinterpret(BitStruct{T},reinterpret(UInt64,x) & ~(_mask(bits) << shift))
 end
 
@@ -579,7 +569,7 @@ function BitStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
     idx = 1
     while idx <= length(syms)
         s = syms[idx]
-        t,shift, bits = _fielddescr(BitStruct{T},Val(s))
+        t,shift, bits = _fielddescr(BitStruct{T},s)
         local v::UInt64
         if t <: Union{BUInt,Unsigned} 
             v = UInt64(nt[idx])
@@ -726,7 +716,7 @@ end
 
 function bitsizeof(::Type{BitStruct{T}}) where T
     lastsym = last(T.parameters[1])
-    type,shift,bits = _fielddescr(BitStruct{T},Val(lastsym))
+    type,shift,bits = _fielddescr(BitStruct{T},lastsym)
     return shift+bits
 end
 
@@ -750,7 +740,7 @@ function check(::Type{BitStruct{T}}) where T
 end
 
 
-# required by dump(aBitStructType)
+# required by dump(aBitStructType) w/o overloading. Still necessary??!
 function Base.datatype_fieldtypes(::Type{BitStruct{T}}) where T
     T.parameters[2].parameters
 end
