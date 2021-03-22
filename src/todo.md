@@ -1,25 +1,47 @@
+# show dump string of BitStruct
 
+## show short/long
+show in REPL should give long version, currently in gives 1-line-version
+for a struct, show and string return 1-line
 
+## typename
+BitStruct{T} default printout prints too much. "BitStruct" without parameters prints currently not enough
 
-# recursive BitStruct
-
-## direct access of fields of sub-BS
-bs.sym1sym2 or bs.sym1_sym2 if bs.sym1 is a BS having field sym2
-(test: faster access?)
-Is a BS.generate switch, generates more Val() expressions for _fieldparam
-Or give list of pseudo-syms as parameter to generate
-
-
-## aggregate fields to BS
-sym1_sym2 is a pseudo-sym for all fields from sym1 up to sym2
-Code generation of all variants is too expensive.
-Allow generation for an explicitly given list of pseudo-syms
-
-does it make any sense??
-Sub-BS should be enough.
-
-
+Idea: 
+ - redefine zuas BitStruct{N,S,T} where N (const symbol) S (symbol tuple) T (type tuple)
+ - use N as short type name
+ - overload print(BitStruct{...}) to print only N: use debugger to track -> method to overload
 
 # method parameters
 
-mthods can have Union{BS1,BS2...} as param type, assuming BS1 and BS2 share field names !!
+methods can have Union{BS1,BS2...} as param type, assuming BS1 and BS2 share field names !!
+(DOC only)
+
+# IO
+
+## methods like iterators: state==(open bits,IO)
+
+read, write with bit buffer as additional parameter (helper type), using any IO
+not: derived IO because: highly inefficient to read byteoriented data from bitstream
+
+# test
+
+## file struct
+
+commontypes.jl: benchmark& test data types, to include
+testio, testops: include in runtests
+benchmark: 3 simple files. 
+
+## benchmark
+structure, reporting, save/compare??!
+ - julia version
+ - 
+
+
+## optimize
+
+del subfields
+del & | vs && || comments
+
+try "all inbounds"
+replace @boundscheck by @ondebug controlled by a global constant?

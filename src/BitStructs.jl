@@ -1,11 +1,9 @@
 module BitStructs
 #
 include("fieldtypes.jl")
-export BInt, BUInt, bitsizeof
+export BInt, BUInt, bitsizeof,  AsciiChar, Latin1Char
 
 include("bitstruct.jl")
-export BitStruct, bitsizeof, @bitstruct
-# Tagging types for BitStructs
-export BInt, BUInt, AsciiChar, Latin1Char
+export BitStruct, set, @bitstruct
 
 end # module

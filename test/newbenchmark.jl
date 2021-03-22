@@ -2,8 +2,6 @@ using BitStructs
 using Random
 using BenchmarkTools
 
-rng = MersenneTwister(1234);
-
 #=
 module BitStructs
 function bitsizeof end
@@ -30,7 +28,7 @@ A not so well defined Enum, but very well suited for BitStructs with customized 
 @enum Strange ::Int BIGMINUS=-999999 ONE=1 TWO=2 THREE=3
 BitStructs.bitsizeof(::Type{Strange}) = 2
 BitStructs.encode(v::Strange) = (v==BIGMINUS ? zero(UInt64) : Int(v)%UInt64)
-BitStructs.decode(::Type{Strange},u::UInt64) = (u==zero(UInt64) ? BIGMINUS : StrangeEncoded(u))
+BitStructs.decode(::Type{Strange},u::UInt64) = (u==zero(UInt64) ? BIGMINUS : Strange(u))
 
 """
 An example of a custom bit type in the Float64 domain.
@@ -93,7 +91,7 @@ struct IFlags
     f3::Bool    
 end
 
-function set(x::IFlags, field::Symbol, value)
+function BitStructs.set(x::IFlags, field::Symbol, value)
     if field===:f1
         return ISArg(value,x.f2,x.f3)
     elseif field===:state
@@ -124,7 +122,7 @@ end
 
 # for field changes, we need some setters on the IS* structs.
 # API is designed as for BitStruct-S
-function set(x::ISArg, field::Symbol, value)
+function BitStructs.set(x::ISArg, field::Symbol, value)
     if field===:f
         return ISArg(value,x.state,x.id,x.delta)
     elseif field===:state
@@ -159,7 +157,7 @@ struct if field changes are expected - last not least for convenience:
 julia has no neat syntax for replacing a field in a variable of an 
 immutable struct type, but it has for mutable structs.
 """
-struct IS begin
+struct IS 
     strange     :: Strange 
     sign        :: Float16
     f           :: IFlags
@@ -171,7 +169,7 @@ struct IS begin
 end
 
 
-mutable struct MS begin
+mutable struct MS
     strange     :: Strange 
     sign        :: Float16
     f           :: IFlags
@@ -184,7 +182,7 @@ end
 
 # for field changes, we need some setters on the IS* structs.
 # API is designed as for BitStruct-S
-function set(x::IS, field::Symbol, value)
+function BitStructs.set(x::IS, field::Symbol, value)
     if field===:strange
         return IS(value,x.sign,x.f,x.state,x.bit,x.ac,x.lc)
     elseif  field===:sign
@@ -205,516 +203,150 @@ function set(x::IS, field::Symbol, value)
     throw(ArgumentError("unknown field name: $field"))
 end
 
-
-# tedious copy/paste, but if conditions are usually compiled away by constant propagation. So it-s efficient code
-function set(x::IS, field::Symbol, value)
-    if field===:strange
-        return IS(value,x.sign,x.f,x.state,x.bit,x.ac,x.lc)
-    elseif  field===:sign
-        return IS(x.strange,value,x.f,x.state,x.bit,x.ac,x.first,x.second)
-    elseif  field===:f
-        return IS(x.strange,x.sign,value,x.state,x.bit,x.ac,x.first,x.second)
-    elseif  field===:state
-        return IS(x.strange,x.sign,x.f,value,x.bit,x.ac,x.first,x.second)
-    elseif  field===:bit
-        return IS(x.strange,x.sign,x.f,x.state,value,x.ac,x.first,x.second)
-    elseif  field===:ac
-        return IS(x.strange,x.sign,x.f,x.state,x.bit,value,x.first,x.second)
-    elseif  field===:first
-        return IS(x.strange,x.sign,x.f,x.state,x.bit,x.ac,value,x.second)
-    elseif  field===:second
-        return IS(x.strange,x.sign,x.f,x.state,x.bit,x.ac,x.first,value)
-    end
-    throw(ArgumentError("unknown field name: $field"))
+function BitStructs.set(x::MS, field::Symbol, value)
+    setproperty!(x,field,value)
+    return x
 end
+
+function fieldcopy(::Type{T},src::U) where {T,U}
+    args = Any[]
+    for s in fieldnames(U)
+        fld = getproperty(src,s)
+        if typeof(fld) <: BitStruct
+            FT = fieldtype(T,s)
+            fld = fieldcopy(FT,fld)
+        end
+        push!(args,fld)
+    end
+    return T(args...)
+end
+
 
 
 #@code_native BitStructs._fielddescr(BS,Val(:status))
 
+BitStructs.generate(BFlags)#,false,false)
+BitStructs.generate(BSArg)#,false,false)
 BitStructs.generate(BS)#,false,false)
 
-@code_native BitStructs._fielddescr(BS,:status)
 
+const vecsize = 100 # vector size for benchmark loop
+rng = MersenneTwister(1234);
+uv = Vector{UInt64}(undef,vecsize)
+rand!(rng,uv)
+bsv = BS[]
+isv = IS[]
+msv = MS[]
 
-"""
-This struct has fields with the same names as BS and field types
-compatible to the types in BS with the smallest size available in
-standard julia types to cover the encoded value range. 
+#bs = reinterpret(BS,uv[1])
+#is = fieldcopy(IS,bs)
 
-It is declared mutable for two reasons: 
-    (a) it is quite large - 28 bytes
-    (b) it contains several fields which are due to frequent updates
-
-
-
-"""
-mutable struct S 
-    status :: ProcStatus # could be the overall status of some process
-    strange :: Strange
-    sign :: Float16 # typeof(1.0)===Float64, but that would be overkill ;-) 
-    flag1 :: Bool
-    flag2 :: Bool
-    flag3 :: Bool # to be honest: many flags push memory savings and runtime advantages of this BitStruct
-    flag4 :: Bool # you could always use Bool for a one-bit field, but ...
-    bit1  :: Int8 # in a numerical context, BInt/BUInt does the number conversion for you
-    ac :: Char # if you know a Char is ASCII, encode it in 7 instead of 32 bits
-    lc :: Char # similar use 8 bits for the Latin-1 character set
-    id1 :: UInt16 # 0..511
-    id2 :: UInt16 # 0..4095
-    delta1 :: Int16 # -256..255
-    delta2 :: Int16 # -256..255 
-end
-Base.copy(x::T) where T<:S = T([getfield(x, k) for k ∈ fieldnames(T)]...)
-
-"""
-    workOnS(v1::Vector, v2::Vector,args::S)
-
-    The benchmark function concerning runtime efficiency for BitStructs which
-    encapsulate many function parameters.
-    
-    workOnS has 3 methods, having the same functionality, but different parameter solutions. 
-    One has an ordinary parameter list. One has a a conventional struct of type S,
-    which bundles those parameters, and one has a BitStruct of type BS doing the same.
-
-    workOnS calls a function subWorkOnS, having a subset of the parameters (50%). For structs,
-    a (copy of) the struct is used as parameter, for a calling list, all parameters are given
-    as positional parameters. 
-    
-    In practical use cases, such functions will be quite large, due to its many parameters,
-    too large for inlining its code. To simulate this in the benchmark, they are
-    declared @noinline.
-"""
-function workOnS end
-
-function subWorkOnS end
-
-
-@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
-    v1[1] = v2[1] # just to force use of v1,v2 
-    if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
-        s /= (:bit1,-1)
-        s /= :delta1, 15 - s.delta1 
-    else
-        s /= :bit1,0
-        s /= :delta2, 51 - s.delta2
-    end
-    v2[2] = v1[2]
-    s /= :id2, (s.id2 - s.id1 + s.delta2)
-    return subWorkOnS(v1,v2,s)
+for i = 1:vecsize
+    local bs = reinterpret(BS,uv[i])
+    push!(bsv,bs)
+    local is = fieldcopy(IS,bs)
+    push!(isv,is)
+    local ms = fieldcopy(MS,bs)
+    push!(msv,ms)
 end
 
-@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::BS)
-    v2[1] = v1[3] # just to force use of v1,v2 
-    if s.bit1==-1
-        s /= :id1, abs(s.delta1 - s.delta2) %UInt64
-    else
-        s /= :id1, abs(s.delta2 - s.delta1) %UInt64
-    end
-    s /= :sign , Float64(s.delta1 * s.delta2) # projection on 1.0/-1.0 is done by encode
-    v1[2] = v2[3]
-    if s.status == S_RUNNING && s.sign < 0.0
-        s /= :status, S_DONE
-    else
-        s /= :status, S_FAILURE
-    end
+
+
+prompt("foo flag or: test with || if any flag is set in loop mutable struct/struct/BitStruct/ /=")
+@noinline function foo(b::Vector{T}) where T
+    s = 0
+    for st in b
+        if st.f.f1 || st.f.f2 || st.f.f2
+            s += 1
+        end
+    end        
     return s
 end
-
-
-@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
-    v1[1] = v2[1] # just to force use of v1,v2 
-    if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
-        s.bit1 = -1
-        s.delta1 = 15 - s.delta1 
-    else
-        s.bit1 = 0
-        s.delta2 = 51 - s.delta2
-    end
-    v2[2] = v1[2]
-    s.id2 = (s.id2 - s.id1 + s.delta2)
-    return subWorkOnS(v1,v2,s) 
-end
-
-@inline function workOnScopy(v1::Vector{Int}, v2::Vector{Int}, s::S)
-    v1[1] = v2[1] # just to force use of v1,v2 
-    if (s.flag1 || s.flag2) && (s.flag3 || s.flag4)
-        s.bit1 = -1
-        s.delta1 = 15 - s.delta1 
-    else
-        s.bit1 = 0
-        s.delta2 = 51 - s.delta2
-    end
-    v2[2] = v1[2]
-    s.id2 = (s.id2 - s.id1 + s.delta2)
-    return subWorkOnS(v1,v2,copy(s))
-end
-
-
-
-@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, s::S)
-    v2[1] = v1[3] # just to force use of v1,v2 
-    if s.bit1==-1
-        s.id1 = abs(s.delta1 - s.delta2) %UInt64
-    else
-        s.id1 = abs(s.delta2 - s.delta1) %UInt64
-    end
-    s.sign = Float16(s.delta1 * s.delta2>= 0.0 ? 1.0 : -1.0) # we must code projection here
-    v1[2] = v2[3]
-    if s.status == S_RUNNING && s.sign < 0.0
-        s.status = S_DONE
-    else
-        s.status = S_FAILURE
-    end
+@btime (foo($msv))
+@btime (foo($isv))
+@btime (foo($bsv))
+prompt("fo flag or: test with | if any flag is set in loop mutable struct/struct/BitStruct/ /=")
+@noinline function fo(b::Vector{T}) where T
+    cmp = typeof(b[1].f)(false,false,false)
+    s = 0
+    for i in 1:length(b)
+        st = b[i]
+        if st.f === cmp
+            s += 1
+        end
+    end        
     return s
 end
+@btime (fo($msv))
+@btime (fo($isv))
+@btime (fo($bsv))
+# TODO reason for alloc-s in BitStruct case ??? 
 
 
 
-@inline function workOnS(v1::Vector{Int}, v2::Vector{Int}, 
-    s_status :: ProcStatus,
-    s_strange :: Strange,
-    s_sign :: Float16,
-    s_flag1 :: Bool,
-    s_flag2 :: Bool,
-    s_flag3 :: Bool,
-    s_flag4 :: Bool,
-    s_bit1  :: Int8,
-    s_ac :: Char,
-    s_lc :: Char,
-    s_id1 :: UInt16,
-    s_id2 :: UInt16,
-    s_delta1 :: Int16,
-    s_delta2 :: Int16)
+prompt("w0 write subfields in loop mutable struct/struct/BitStruct")
+@noinline function w0(b::Vector{T}) where T
+    s = 0%UInt64
+    for i in one(UInt64):UInt64(100)
+        b[i] = set(b[i],:first, set(b[i].first,:id,b[i].second.id))
+    end        
+    return b
+end
+@btime (w0($msv))
+@btime (w0($isv))
+@btime (w0($bsv))
 
+prompt("b0 read subfields in loop mutable struct/struct/BitStruct")
+@noinline function b0(b::Vector{T}) where T
+    s = 0%UInt64
+    for i in one(UInt64):UInt64(100)
+        s += b[i].first.id + b[i].second.id
+    end        
+    return s
+end
+@btime (b0($msv))
+@btime (b0($isv))
+@btime (b0($bsv))
+
+## method param benchmark
+
+
+@inline function work(v1::Vector{Int}, v2::Vector{Int}, s) # s is a ?S
     v1[1] = v2[1] # just to force use of v1,v2 
-    if (s_flag1 || s_flag2) && (s_flag3 || s_flag4)
-        s_bit1 = -1 %Int8
-        s_delta1 = (15 - s_delta1 )%Int16
+    if (s.f.f1 || s.f.f2) && (s.first.f.f3 || s.second.f.f3)
+        s = set(s,:bit,-1)
+        s = set(s,:first, s.second)
     else
-        s_bit1 = 0%Int8
-        s_delta2 = (51 - s_delta2) %Int16
+        s = set(s,:bit,0)
+        s = set(s,:second, s.first)
     end
     v2[2] = v1[2]
-    s_id2 = (s_id2 - s_id1 + s_delta2)
-    return subWorkOnS(v1,v2,s_status,s_sign,s_bit1,s_id1,s_delta1,s_delta2)
+    s = set(s,:sign,Float64(v1[3]-v2[3]))
+    return subWork(v1,v2,s.first)+subWork(v2,v1,s.second)
 end
 
-
-@inline function subWorkOnS(v1::Vector{Int}, v2::Vector{Int}, 
-    s_status :: ProcStatus,
-    s_sign :: Float16,
-    s_bit1  :: Int8,
-    s_id1 :: UInt16,
-    s_delta1 :: Int16,
-    s_delta2 :: Int16)
-    
+@inline function subWork(v1::Vector{Int}, v2::Vector{Int}, s) # s is a ?SArg
     v2[1] = v1[3] # just to force use of v1,v2 
-    if s_bit1==-1
-        s_id1 = abs(s_delta1 - s_delta2)
+    if s.f.f1
+        s = set(s, :id, (abs(s.delta)+v2[3])%UInt )
     else
-        s_id1 = abs(s_delta2 - s_delta1)
+        s = set(s, :delta, s.id/2 -v2[3])
     end
-    s_sign = Float16(s.delta1 * s.delta2 >= 0.0 ? 1.0 : -1.0) # we must code projection here
-    v1[2] = v2[3]
-    if s_status == S_RUNNING && s_sign < 0.0
-        s_status = S_DONE
+    if s.state == S_RUNNING 
+        s = set(s, :state, S_DONE)
     else
-        s_status = S_FAILURE
+        s = set(s, :state, S_FAILURE)
     end
-    return s_status,s_sign,s_id1 # return all changed values
+    return s.id+s.delta
 end
 
 
 v1 = [1,2,3]
 v2 = [4,5,6]
 
-s = S(S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
-bs = BS(S_RUNNING,BIGMINUS,-1.0,true,false,false,true,0,'a','c',0x1,0x2,3,4)
+prompt("function parameter test mutable struct/struct/BitStruct")
+@btime work($v1,$v2,$msv[1])
+@btime work($v1,$v2,$isv[1])
+@btime work($v1,$v2,$bsv[1])
 
-#show(s)
-
-#show(bs)
-
-
-
-
-
-## some simple field access benchmarks to begin with
-
-mutable struct T
-    id1::UInt16
-    id2::UInt16
-    flag1::Bool
-    flag2::Bool
-end
-Base.copy(x::T) = T([getfield(x, k) for k ∈ fieldnames(T)]...)
-
-@bitstruct BT begin
-    id1::BUInt{16}
-    id2::BUInt{16}
-    flag1::Bool
-    flag2::Bool
-end
-BitStructs.generate(BT)
-
-t = T(5%UInt16, 6%UInt16, true, false)
-bt = BT(5%UInt16, 6%UInt16, true, false)
-
-
-prompt("struct/BitStruct simple field access")
-@btime $t.id1,$t.id2,$t.flag1,$t.flag2
-# this is optimized away, totally
-@btime $bt.id1,$bt.id2,$bt.flag1,$bt.flag2
-
-
-prompt("struct/BitStruct field access in @noinline function")
-@noinline bench1(t) = (t.id1+t.id2,t.flag1,t.flag2)
-@btime bench1($t)
-@btime bench1($bt)
-
-@noinline function set2fields(s)
-    if typeof(s) <: BitStruct
-        s /= :id1, s.id2
-        s /= :flag1, s.flag2
-    else
-        s.id1 = s.id2
-        s.flag1 = s.flag2
-    end
-    return s
-end
-
-
-tc = copy(t)
-prompt("set 2 fields on struct then BitStruct")
-@btime set2fields($tc)
-@btime set2fields($bt)
-
-
-@noinline function setSpecialfields(s::T,s2::T) where T <: Union{S,BS}
-    if typeof(s) <: BitStruct
-        s /= :status, s2.status
-        s /= :strange, s2.strange
-        s /= :sign, s2.sign
-    else
-        s.status = s2.status
-        s.strange = s2.strange
-        s.sign = s2.sign
-    end
-    return s
-end
-
-
-# same, but using direct BitStruct field copy
-@noinline function setSpecialfields2(s::T,s2::T) where T <: Union{S,BS}
-    if typeof(s) <: BitStruct
-        s /= :status, s2
-        s /= :strange, s2
-        s /= :sign, s2
-    else
-        s.status = s2.status
-        s.strange = s2.strange
-        s.sign = s2.sign
-    end
-    return s
-end
-
-sc = copy(s)
-s2 = copy(s)
-bs2 = bs
-prompt("set special fields on struct then BitStruct")
-@btime setSpecialfields($sc,$s2)
-@btime setSpecialfields($bs,$bs2)
-@btime setSpecialfields($bs,$bs2)
-
-
-sc = copy(s)
-prompt("set 2 fields on struct then BitStruct (large struct)")
-@btime set2fields($sc)
-
-println("the statements executed by set2fields run, if executed directly")
-bs /= :id1, s.id2
-bs /= :flag1,bs.flag2
-#show(bs)
-println("Calling set2fields(bs) causes a crash")
-set2fields(bs)
-# !!!!!!!!!!!!!!!!!!!!!!!! next line crashes process !!!!!!!!!!!!!!!!!!!!!
-#set2fields(bs)
-@btime set2fields($bs)
-# drill down on time consume setting a field
-
-
-
-prompt("b1 set field in loop by /=")
-@noinline function b1(b::T) where T <: BitStruct
-    s = 0%UInt64
-    for i in zero(UInt64):UInt64(100)
-        b /= (:id1, i)
-        s += b.id1
-    end        
-    return s
-end
-@btime (b1($bt))
-
-
-prompt("b2 set field in loop by set(..)")
-@noinline function b2(b::T) where T <: BitStruct
-    s = 0%UInt64
-    for i in zero(UInt64):UInt64(100)
-        b = BitStructs.set(b,:id1, i)
-        s += b.id1
-    end        
-    return s
-end
-@btime (b2($bt))
-
-
-
-
-btv = BT[]
-tv =  T[]
-
-
-for i in 1:100
-    push!(tv,T(i%UInt16,(i+1)%UInt16,true,false))
-    push!(btv,BT(i%UInt16,(i+1)%UInt16,true,false))
-end
-
-
-"access 4 fields in a loop"
-function bench1(vec)
-    sum = 0%UInt64
-    for t in vec
-        sum += t.id1+t.id2+UInt(t.flag1)+UInt(t.flag2)
-    end
-    sum
-end
-
-"write 4 fields in a loop"
-function bench2(vec)
-    sum = 0
-    if eltype(vec) <: BitStruct
-        for i in 2:length(vec)
-            t = vec[i]
-            t = t / (:id1 , i%UInt64) / (:id2 , i%UInt64) / (:flag1 , i%2 ==0) / (:flag2 , i%2 !=0)
-            sum += t.id1
-            vec[i-1] = t
-        end
-    else
-        for i in 2:length(vec)
-            t = vec[i]
-            t.id1 = i%UInt64
-            t.id2 = i%UInt64
-            t.flag1 = (i%2 ==0)
-            t.flag2 = (i%2 !=0)
-            sum += t.id1
-            vec[i-1] = t
-        end
-    end
-    sum
-end
-
-prompt("struct/BitStruct: access 4 fields in a loop")
-@btime bench1($tv)
-@btime bench1($btv)
-
-prompt("struct/BitStruct: write 4 fields in a loop")
-@btime bench2($tv)
-#crash!
-#bench2(btv)
-@btime bench2($btv)
-
-
-
-bsv = BS[]
-sv =  S[]
-
-
-for i in 1:100
-    push!(sv,s)
-    push!(bsv,bs)
-end
-
-
-prompt("struct/BitStruct: access 4 fields in a loop, large struct")
-@btime bench1($sv)
-@btime bench1($bsv)
-
-prompt("struct/BitStruct: write 4 fields in a loop, large struct")
-@btime bench2($sv)
-@btime bench2($bsv)
-
-
-"write 4 fields in a loop from another struct instance"
-function bench3(vec1, vec2)
-    sum = 0
-    if eltype(vec1) <: BitStruct
-        for i in 2:length(vec1)
-            t = vec1[i]
-            u = vec2[i]
-            t /= :id1, u
-            t /= :id2, u
-            t /= :flag1, u
-            t /= :flag2, u
-            sum += t.id1
-            vec1[i-1] = t
-        end
-    else
-        for i in 2:length(vec1)
-            t = vec1[i]
-            u = vec2[i]
-            t.id1 = u.id1
-            t.id2 = u.id2
-            t.flag1 = u.flag1
-            t.flag2 = u.flag2
-            sum += t.id1
-            vec1[i-1] = t
-        end
-    end
-    sum
-end
-"write 4 fields in a loop from another struct instance standard assignment"
-function bench3a(vec1, vec2)
-    sum = 0
-    for i in 2:length(vec1)
-        t = vec1[i]
-        u = vec2[i]
-        t /= :id1, u.id1
-        t /= :id2, u.id2
-        t /= :flag1, u.flag1
-        t /= :flag2, u.flag2
-        sum += t.id1
-        vec1[i-1] = t
-    end
-    sum
-end
-
-prompt("struct/BitStruct: copy 4 fields from another struct in a loop, large struct struct / BitStruct assign / BitStruct field copy")
-sv2 = copy(sv)
-bsv2 = copy(bsv)
-@btime bench3($sv,sv2)
-@btime bench3a($bsv,$bsv2)
-@btime bench3($bsv,$bsv2)
-
-
-# currently, bad again... no constant propagation.
-prompt("struct/BitStruct: access 4 fields, direct code")
-@btime $s.delta1-$s.delta2,$s.id1, $s.id2
-@btime $bs.delta1-$bs.delta2,$bs.id1, $bs.id2
-
-
-
-
-
-
-
-## function parameter list benchmark
-prompt("function parameter benchmark: struct/structWithCopy/BitStruct/parameterlist")
-@btime workOnS($v1,$v2,$s)
-@btime workOnScopy($v1,$v2,$s)
-#crash!
-#workOnS(v1,v2,bs)
-@btime workOnS($v1,$v2,$bs)
-
-@btime workOnS($v1,$v2,S_RUNNING,BIGMINUS,Float16(-1.0),true,false,false,true,0%Int8,'a','c',0x0001,0x0002,3%Int16,4%Int16)
-nothing
 

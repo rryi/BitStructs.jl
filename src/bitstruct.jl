@@ -146,113 +146,128 @@ end
 
 
 """
-    generate(bitStruct::Datatype,specialize::Bool=true,subfields::Bool=true)
-    generate(bitStruct::Datatype,bitstructs...;specialize::Bool=true,subfields::Bool=true)
+    generate(m::Module)    
+    generate(bitStruct::Datatype)
+    generate(bitStruct::Datatype,bitstructs...)
 
-*generate* compiles methods for BitStruct types. 
+*generate* compiles faster methods for field access of BitStruct types. 
 
 # when and how to use
 
 Calling *generate* is not mandatory, but highly recommended. Many BitStruct
-operations are about factor 1000 (!!!) faster when *generate* is called with
-parameter specialize =true.
+operations are about factor 1000 (!!!) faster after *generate* was called.
 
 *generate* has the following preconditions
 for a call with a bitStruct type as parameter:
     
  * *generate* must be called at top level (not inside a function or block)
  * any type T used as bitfield type inside of type bitStruct must alreeady exist
- * [`bitsizeof`](@ref)(T) for a type T used in a bitfield type must already exist
+ * [`bitsizeof`](@ref)(T) for such a type T must be defined
 
 As a rule of thumb, define all BitStruct types and their custom bitfield types
 at the beginning of a logical source code unit (a module, or a .jl file included at
 top level), including all bitszizeof method definitions, and then call *generate*.
 
-You should call *generate* before BitStruct instances are created. You **must** call
-*generate* with subfields=true before any subfield access. Subfield access refers to
-the situation where a BitStruct type BT has a field f of another BitStruct type BST,
-and BST has a field f2. If subfield access is generated, you can write 
-x.f_f2 as alternative for x.f.f2 for a x::BT. Subfield access has no shorter 
-source code, but generates shorter and faster native code.
+You should call *generate* before BitStruct instances are created. You must define
+*encode* and *decode* methods for custom bitfield types before you access bitfields
+of that type.
 
-It is called after the BitStruct types used as arguments are defined, including bitsizeof forthose types.  (together with
-methods for bitsizeof, encode and decode)
+Calling *generate* with a module as parameter, will generate for all BitStruct types
+found in that module at the time of the call.
 
-Specializes field access methods for BitStruct type targetBitStruct usi{T}, they are redefined as
-optimized, inlined methods. It gives a dramatic performance boost 
-(about factor 1000) for BitStruct field access methods.
+# why does *generate* speed up BitStruct field access by factor 1000?
 
-Call it if runtime performance has any relevance for your application.
-Call it once, immediately after BitStruct type creation.
+A bitfield read access is not more than a SHIFT and an AND operation on a 64-bit value - 
+if the value for SHIFT and the bitmask for AND are already known. They depend on the 
+bitfield name, calculating them requires a loop over BitStruct field names which needed 
+about factor 1000 more CPU time than the SHIFT and AND operation, in our benchmarks. 
+
+*generate* replaces the iterative default implementation for bitfield access by generated code,
+which is specific for every field of a BitStruct, with constants for SHIFT and AND. 
+It computes parameters for SHIFT and AND only once "at compile time" in *generate* call.
+Almost all bitfield accesses in real world use symbol constants for field names.
+Using multiple dispatch, Julia compiler identifies the access method for a field given as
+symbol constant at compile time and inlines the SHIFT and AND operation - all field 
+identification effort is "compiled away".
+
+# Any reasons not to use *generate*?
+
+Not really. *generate* defines additional n methods for a BitStruct having
+n bitfields. Its calculation overhead roughly equals the calculation of the
+SHIFT and AND parameters of the last bitfield of a BitStruct. 
+
+Resource consumption is neglible, and you will have overall runtime
+advantages after a couple of field accesses per BitStruct type.
+Call *generate* if runtime performance has any relevance for your application.
+
+# Why not implemented in macro @bitstruct or as @generated function?
     
-: they compile down to a bare >> and & operation, even beating 
-access speed of a mutable struct field access.
-Call it if runtime performance has any relevance for your application.
-Call it once, immediately after BitStruct type creation.
+It does not work in an acceptable fashion, due to the so called "world age" problem.
+A macro and a generated function are compiled at its first use. They can
+access the functions (and its methods) only in the state they are at
+compile time of the macro/@generated function. 
 
-Precondition: all field types of BitStruct{T} must be already defined, including
-methods encode, decode, bitsizeof for all field types used in BitStruct{T}.
+Using macro or @generated, would imply you have to define ALL types used as
+a bitfield type anywhere in a BitStruct in your whole application, including
+the 'bitsizeof' method for these types. If your application uses two modules
+A and B, each having enums or custom types used for bitfields, you are lost:
+the first *using* or *import* statement for A or B will trigger a BitStruct
+compilation, at least the other module will encounter "world age" errors.
 
-Any reasons not to call it? Not really. Well, it compiles 3 methods 
-per field of BitStruct{T}, causing some initialization overhead, 
-and consuming some RAM. But these methods are very short, resource
-consumption is neglible.
-
-# How does it work? 
-
-The basic idea of a BitStruct field is: it is 
-a sequence of bits in an UInt64. Reading a BUInt{N} field of a BitStruct
-is nothing more than a SHIFT operation >> and an AND operation & on the 
-BitStruct binary value, an UInt64. They will almost always be applied to a 
-CPU register variable, each consuming typically 1 CPU cycle, no memory access. 
-With a call to specialize, the BitStruct field specific parameters for SHIFT and AND
-are computed once in the specialize call, and used as constants in code generation.
-
-Without this specialization, the bitmask parameters of a field are computed
-at runtime, in every call, including a sequential search for the field name
-in the field name list, bounds checks, maybe complex computation to determine 
-the size in bits of a field.
-
-Julias compiler is already very smart in what is called constant propagation, 
-but has a priority on safety. It will not do optimizations if it cannot prove 
-its preconditions. There are some "compiler switches" for more aggressive
-optimization, like Base.@pure, but they are at risk. One of them is, that
-a pure function must not be redefined: it has to return the same value for
-the same set of parameters forever. But in julia, everyone can redefine every
-(generic) function at any time, including BitStruct.bitsizeof which is at
-core of bitfield parameter computation. 
-
-Function specialize has a precondition: it requires that bitsizeof returns
-the same result for a type used as field type in BitStruct{T}, 
-during the time period from the specialize call, until
-package BitStructs is recompiled. Given this condition, it calculates
-bitfields parameters for all fields of BitStruct{T}, and generates methods
-for each field, using computed bitfield parameters as constants.
-In other words: it does constant propagation by itself, with relaxed 
-preconditions, compared to those julia compiler needs.
+In contrast to a macro or a @generated function, *generate* is an ordinary
+(generic) julia function, and you decide in which world of method tables
+it operates, by the sequence of operations in your program and the
+location where you place the *generate* call.
 """
 function generate end
 
 
-function generate(bsType::DataType, subfields::Bool=true, specialize::Bool=true) 
+function generate(bsType::DataType) 
     bsType <: BitStruct || throw(ArgumentError("Parameters must be a concrete BitStruct type, but is $bsType"))
     bitsize = bitsizeof(bsType)
     bitsize <= 64 || throw(ArgumentError("$bsType is invalid - has too many bits (max is 64): $bitsize"))
-    if specialize 
-        _generate(bsType,bsType,0,"",subfields)
-        ex = :(@inline function _fielddescr(::Type{$bsType}, s::Symbol) 
-            return _fielddescr($bsType, Val(s))
-            end)
+
+    types = bsType.parameters[1].parameters[2].parameters
+    syms = bsType.parameters[1].parameters[1]
+    shift = 0
+    idx = 1
+    while idx <= length(syms)
+        sym = syms[idx]
+        type = types[idx]
+        bits = bitsizeof(type)
+        strsym=string(sym)
+        ex = :(@inline function _fielddescr(::Type{$bsType}, ::Val{Symbol($strsym)}) 
+        return ($type, $shift, $bits)
+        end)
         #println("about to compile: ",ex)
-        eval(ex) # this compiles the specialized function with symbol argument
-    else
-        subfields && throw(ArgumentError("subfield access requires specialize"))
+        eval(ex) # this compiles the specialized function
+        shift += bits
+        idx += 1
     end
+    ex = :(@inline function _fielddescr(::Type{$bsType}, s::Symbol) 
+        return _fielddescr($bsType, Val(s))
+        end)
+    #println("about to compile: ",ex)
+    eval(ex) # this compiles the specialized function with symbol argument
     return nothing
 end
 
 
+function generate(m::Module)
+    for n in names(m)
+        try # if getfield fails
+            t = getfield(m, n)
+            if t <: BitStruct
+                #println("generate name=",n,", type= ",t)
+                generate(t)
+            end
+        catch
+        end
+    end
+end
 
+
+#=
 function Base.string(::Type{BitStruct{T}}) where T<:NamedTuple
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
@@ -266,18 +281,19 @@ function Base.string(::Type{BitStruct{T}}) where T<:NamedTuple
     end
     return String(take!(io))
 end
-
+=#
 
 function Base.string(x::BitStruct{T}) where T<:NamedTuple
     types = Tuple(T.parameters[2].parameters)
     syms = T.parameters[1]
     io = IOBuffer()
-    print(io,string(BitStruct{T}),'(')
+    #print(io,string(BitStruct{T}),'(')
+    print(io,"BitStruct(")
     for i in 1:length(syms)
         delim = i==length(syms) ? ')' : ','
         print(io,getproperty(x,syms[i]),delim)
     end
-    #close(io)
+    #close(io)b
     return String(take!(io))
 end
 
@@ -292,7 +308,11 @@ function Base.show(io::IO, ::MIME"text/plain", x::BitStruct{T}) where T<:NamedTu
         #t = types[i]
         #println("  ",s, "::",t, " , ",shift," , ",bits)
         v = getproperty(x,s)
-        println("  ",s, ":",typeof(v),' ',repr(getproperty(x,s)))
+        if typeof(v) <: BitStruct
+            println("  ",s, ": ",repr(getproperty(x,s)))
+        else
+            println("  ",s, ":",typeof(v),' ',repr(getproperty(x,s)))
+        end
     end
     println("end")
 end
@@ -318,7 +338,7 @@ function Base.dump(io::IOContext, x::BitStruct{T}, n::Int, indent) where T <: Na
             v = getproperty(x,s)
             print(io,indent2,s," [",shift+1,':',shift+bits,"::",t, "]: ")
             Base.dump(io, v,n-1,indent2)
-            println(io)
+            typeof(v) <: BitStruct || println(io) # TODO get rid off confition
         end
     end
     nothing
@@ -326,7 +346,7 @@ end
 
 
 """
-    set(ps::BitStruct{T};s::Symbol,v)
+    set(x::BitStruct{T};s::Symbol,v)
 
 replace field s in ps by v.
 """
@@ -719,6 +739,19 @@ function bitsizeof(::Type{BitStruct{T}}) where T
     type,shift,bits = _fielddescr(BitStruct{T},lastsym)
     return shift+bits
 end
+
+
+
+
+function decode(::Type{BitStruct{T}},v::UInt64) where T
+    @boundscheck checkbitsize(v,bitsizeof(BitStruct{T}))
+    return reinterpret(BitStruct{T},v)
+end
+
+@inline function encode(::Type{BitStruct{T}}, v::BitStruct{T}) where {T<:NamedTuple}
+    return reinterpret(UInt64,v)
+end
+
 
 """
     check(::Type(BitStruct))
