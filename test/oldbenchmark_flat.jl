@@ -396,11 +396,11 @@ end
 @btime (b1($bt))
 
 
-prompt("b2 set field in loop by set(..)")
+prompt("b2 set field in loop by setproperty(..)")
 @noinline function b2(b::T) where T <: BitStruct
     s = 0%UInt64
     for i in zero(UInt64):UInt64(100)
-        b = BitStructs.set(b,:id1, i)
+        b = BitStructs.setproperty(b,:id1, i)
         s += b.id1
     end        
     return s
