@@ -26,9 +26,6 @@ primitive type BitStruct{T<:NamedTuple} 64 end
 Base.fieldnames(::Type{BitStruct{T}}) where T = T.parameters[1]
 Base.propertynames(ps::BitStruct{T}) where T = fieldnames(BitStruct{T})
 
-# NTuple{N, Any} is supertype of all tuples of length N!
-# tuple_len(::NTuple{N, Any}) where {N} = Val{N}()
-
 
 """
 _mask(Int::bits) :: UInt64
@@ -39,42 +36,44 @@ return a bit mask to restrict to the lowest *bits* bits of an UInt64.
 
 
 """
-    _get(pstruct::UInt64, shift, bits)
+    _get(bitstruct::UInt64, shift, bits)
 
 extract a bitfield from a packed struct.
-If pstruct is interpreted as a bit vector, it returns pstruct[shift+1:shift+bits] 
+If bitstruct is interpreted as a bit vector, it returns bitstruct[shift+1:shift+bits] 
 """
-@inline _get(pstruct::UInt64, shift, bits) = (pstruct>>>shift) & _mask(bits)
+@inline _get(bitstruct::UInt64, shift, bits) = (bitstruct>>>shift) & _mask(bits)
 
-# this variant might give better code (guaranteed constant propagation)
-@inline _get(pstruct::UInt64, ::Val{shift},::Val{bits}) where {shift,bits} = (pstruct>>>shift) & _mask(bits)
+# this variant was not faster inm benchmarking.
+#@inline _get(bitstruct::UInt64, ::Val{shift},::Val{bits}) where {shift,bits} = (bitstruct>>>shift) & _mask(bits)
 
 
 
 """
-    _set(pstruct::UInt64, shift, bits, value::UInt64)
+    _set(bitstruct::UInt64, shift, bits, value::UInt64)
 
 set a bitfield in a packed struct.
-If pstruct and value are interpreted as bit vector, it performs pstruct[shift+1:shift+bits] = value[1..bits]
+If bitstruct and value are interpreted as bit vector, it performs bitstruct[shift+1:shift+bits] = value[1..bits]
 
 Boundscheck tests if no bit is set in balue except the lowest *bits* bits. 
 This is guaranteed by encode(...,bits).
 """
-@inline function _set(pstruct::UInt64,shift,bits,value::UInt64) 
+@inline function _set(bitstruct::UInt64,shift,bits,value::UInt64) 
     @boundscheck checkbitsize(value,bits)
-    pstruct &= !(_mask(bits) << shift) # delete bitfield
-    pstruct |= value << shift
-    return pstruct
+    bitstruct &= ~(_mask(bits) << shift) # delete bitfield
+    bitstruct |= value << shift
+    return bitstruct
 end
 
-# variant for benchmarking...
-@inline function _set(pstruct::UInt64,::Val{shift},::Val{bits}, value::UInt64) where {shift, bits}
+# variant for benchmarking... was not faster in setperoperty with constant bits,shift parameters
+# !!! but had strange effect: return value was Any instead of UInt64 !!!
+#=
+@inline function _set(bitstruct::UInt64,::Val{shift},::Val{bits}, value::UInt64) where {shift, bits}
     @boundscheck checkbitsize(value,bits)
-    pstruct &= ~(_mask(bits) << shift) # delete bitfield
-    pstruct |= value << shift
-    return pstruct
+    bitstruct &= ~(_mask(bits) << shift) # delete bitfield
+    bitstruct |= value << shift
+    return bitstruct
 end
-
+=#
 
 
 """
@@ -100,6 +99,7 @@ function _fielddescr end
 
 # generic version. Specialized methods are created by generate(..)
 function _fielddescr(::Type{BitStruct{T}},s::Symbol) where {T<:NamedTuple} 
+    #println("generic _fielddescr s=$s T=$T")
     shift = 0
     types = T.parameters[2].parameters
     syms = T.parameters[1]
@@ -115,11 +115,12 @@ function _fielddescr(::Type{BitStruct{T}},s::Symbol) where {T<:NamedTuple}
         shift += bits
         idx += 1
     end
-    throw(ArgumentError(s)) 
+    throw(ArgumentError(string(s))) 
 end
 
 
-# recursive implementation
+# recursive implementation - was for subfield direct access which turned out to have no advantage
+#=
 function _generate(targetType::DataType, bsType::DataType, shift::Int, prefix::String, subfields::Bool) 
     types = bsType.parameters[1].parameters[2].parameters
     syms = bsType.parameters[1].parameters[1]
@@ -133,7 +134,7 @@ function _generate(targetType::DataType, bsType::DataType, shift::Int, prefix::S
         return ($type, $shift, $bits)
         end)
         #println("about to compile: ",ex)
-        eval(ex) # this compiles the specialized function
+        eval(ex) # this compiles the specialized entry function
         if subfields && type <: BitStruct
             # generate also all fields of type as fields of target, with sym * '_' as prefix
             _generate(targetType,type,shift,strsym*"_",subfields)
@@ -143,18 +144,21 @@ function _generate(targetType::DataType, bsType::DataType, shift::Int, prefix::S
     end
     return nothing
 end
+=#
 
+
+# TODO maybe we should split into 3 functions, returning 1 value, each?!
 
 """
     generate(m::Module)    
     generate(bitStruct::Datatype)
-    generate(bitStruct::Datatype,bitstructs...)
 
-*generate* compiles faster methods for field access of BitStruct types. 
+
+*generate* compiles really fast methods for field access of BitStruct types. 
 
 # when and how to use
 
-Calling *generate* is not mandatory, but highly recommended. Many BitStruct
+Calling *generate* is not mandatory, but highly recommended. Most BitStruct
 operations are about factor 1000 (!!!) faster after *generate* was called.
 
 *generate* has the following preconditions
@@ -346,22 +350,33 @@ end
 
 
 """
-    set(x::BitStruct{T};s::Symbol,v)
+setproperty(x::BitStruct{T};s::Symbol,v)
+setproperty(x::BitStruct{T};s::Symbol,v::BitStruct{T})
+setproperty(x::BitStruct{T};kwargs...)
 
-replace field s in ps by v.
+return a new BitStruct which equals x in all fields but s.
+
+Field s is replaced by v in the returned BitStruct.
+If v isa BitStruct{T}, field s is replaced by getproperty(v,s)
+
+The variant with keywords is for convenience, if runtime performance is
+not important - it involves memory allocation and is slow.
+
+Copying a field from a BitStruct of the same type is the fastest variant.
 """
-@inline function set(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
+@inline function setproperty(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     t,shift, bits = _fielddescr(BitStruct{T},s)
     u = encode(t,v)
-    ret = _set(ret,Val(shift),Val(bits),u)
+    #ret = _set(ret,Val(shift),Val(bits),u)
+    ret = _set(ret,shift,bits,u)
     return reinterpret(BitStruct{T},ret)
 end
 
 
 
 # optimized code when copying a field from another BitStruct instance
-@inline function set(x::BitStruct{T},s::Symbol,v::BitStruct{T}) where {T<:NamedTuple}
+@inline function setproperty(x::BitStruct{T},s::Symbol,v::BitStruct{T}) where {T<:NamedTuple}
     t,shift, bits = _fielddescr(BitStruct{T},s)
     mask = _mask(bits) << shift
     u = reinterpret(UInt64,x) & mask
@@ -370,26 +385,21 @@ end
 end
 
 
-
-"""
-    set(ps::BitStruct{T};kwargs...)
-
-replace a selection of fields given by named parameters.
-parameter names in args must match properties of ps
-"""
-function setm(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
+function setproperty(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in pairs(kwargs)
         s = p.first
         t,shift, bits = _fielddescr(BitStruct{T},s)
         v = encode(t,p.second)
-        ret = _set(ret,Val(shift),Val(bits),v)
+        #ret = _set(ret,Val(shift),Val(bits),v)
+        ret = _set(ret,shift,bits,v)
     end
     return reinterpret(BitStruct{T},ret)
 end
 
 
 # for benchmarking, only
+#=
 function setm2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     nt = kwargs.data # the named tupla
@@ -399,33 +409,38 @@ function setm2(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
         s = syms[idx]
         t,shift, bits = _fielddescr(BitStruct{T},s)
         v = encode(t,nt[idx])
-        ret = _set(ret,Val(shift),Val(bits),v)
+        #ret = _set(ret,Val(shift),Val(bits),v)
+        ret = _set(ret,shift,bits,v)
     end
     return reinterpret(BitStruct{T},ret)
 end
-
+=#
 
 ## overloaded operators
 
 
 @inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
     type,shift,bits = _fielddescr(BitStruct{T},s)
-    return decode(type,_get(reinterpret(UInt64,x),shift,bits))
+    return @inbounds decode(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
 
 """
     bs::BitStruct{T}   /   (fld,value)::Tuple{Symbol,Any}
 
-
 fld must be a property of BitStruct{T} (a symbol contained in T, identifying a field).
 The operation / replaces the bitfield fld in bs with value and returns the result.
 
 In addition, the syntax ´bs /= fld,value´ is supported for a variable bs of 
 type BitStruct{T}, it stores the result in bs.
+
+value is either a BitStruct{T} or a value supported by [`encode`](@ref)
+for the bitfield type of field fld. If value is a BitStruct{T}, its fld field
+is used as value. If bs, bs2 are BitStruct{T} instances, 
+*bs / (:fld,bs2)* is a shortcut for *bs / (:fld,bs2.fld)*
 """
 @inline function Base.:(/)(x::BitStruct{T},t::Tuple{Symbol,Any}) where {T<:NamedTuple}
-    set(x,t[1],t[2])
+    setproperty(x,t[1],t[2])
 end
 
 
@@ -562,71 +577,73 @@ end
 
 ## constructors
 
-#BitStruct{T}() where {T<:NamedTuple} = reinterpret(BitStruct{T},zero(UInt64))
-
 # struct-alike constructor
-function BitStruct{T}(args...) where T <:NamedTuple
+"""
+    BitStruct{T}(args...;kwargs...)
+
+Convenience constructor for a BitStruct. 
+
+You pass field values in declared order, for n given values, the first n
+fields of the BitStruct are assigned. Remaining fields are zero-initialized
+(all bits are zero).
+
+In addition, you can give a keyword argument list with *fieldname=value* syntax,
+specifically setting some fields. List is processed from left to right, it is 
+possible to overwrite already set fields with keyword notation.
+
+If no arguments at all are given, all bits are unset. 
+If any argument is given, constructor will allocate helper memory
+and process all values as type Any - in other words, it is slow.
+
+For a fast construction, use the constructor with no arguments, and set
+all fields by [`setproperty`](@ref) or use operator / for that
+(same operation, but shorter syntax).
+"""
+function BitStruct{T}(args...;kwargs...) where T <:NamedTuple
     ret = reinterpret(BitStruct{T},zero(UInt64))
     syms = T.parameters[1]
     for (i,v) in enumerate(args)
         ret /= (syms[i],v)
     end
+    for p in kwargs
+        ret /= (p.first,p.second)
+    end
     return ret
 end
+
+# BitStruct has a zero value ...
+Base.zero(::Type{BitStruct{T}}) where T <:NamedTuple = reinterpret(BitStruct{T},zero(UInt64))
 
 # this is more specific than BitStruct{T}() ==> stack overflow. why??!
 #function BitStruct{T}(;kwargs...) where {T<:NamedTuple}
 #    set(reinterpret(BitStruct{T},zero(UInt64));kwargs...)
 #end
 
-# deprecated
-#=
-# first try: constructor setting some fields. TODO redesign using helper methods
-"constructor setting some fields, fields not included in nt stay 0"
-function BitStruct{T}(nt::NT) where {T<:NamedTuple, NT <: NamedTuple}
-    ret = zero(UInt64)
-    syms = NT.parameters[1]
-    idx = 1
-    while idx <= length(syms)
-        s = syms[idx]
-        t,shift, bits = _fielddescr(BitStruct{T},s)
-        local v::UInt64
-        if t <: Union{BUInt,Unsigned} 
-            v = UInt64(nt[idx])
-            v >= (1<<bits) && error("overflow for type $t with $bits bits: value $v")
-        end
-        if t <: Union{BInt,Signed,Bool} 
-            iv = Int64(nt[idx])
-            (iv < -(1<<(bits-1)) || iv>= (1<<(bits-1)) ) && error("overflow for type $t with $bits bits: value $v")
-            v = (iv%UInt64) & (1<<bits - 1)
-        end
-        if t <: Enum
-            v = (Int(nt[idx])+typemin(t))%UInt64
-            v >= (1<<bits) && error("overflow for type $t with $bits bits: value $v")
-        end
-        ret |= (v<<shift)
-        idx += 1
-    end
-    return reinterpret(BitStruct{T},ret)
-end
-=#
 
 
 """
     @BitStruct name begin key1::Type1; key2::Type2; ...; end
  or @BitStruct name {key1::Type1, key2::Type2, ...}
 
- This macro defines a BitStruct and performance-optimized methods for BitStruct field access.
-Syntax is that of [`@NamedTuple`](@ref), except the leading name
+Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
+resembling the usual struct syntax.
 
-name is an identifier, it becomes a constant to be used as type alias 
+This macro defines a concrete BitStruct type with the given fields and bitfield types.
+Syntax is that of [`@NamedTuple`](@ref), except the leading name.
+
+name is an identifier, it becomes a constant to be used as short type name 
 for the constructed BitStruct type. 
 
 It follows a block with a sequence of ident::type declarations,
 ident is the field name in the BitStruct, and type its declared
-type.
+bitfield type. Bitfield type means: it is a type identifying the number of bits
+used in the BitStruct, and it has associated conversion methods which convert
+a bitfield value to and from the data type which is accessed
+by field access. bitfield type can be identical to the external type, e. g.
+Bool. Bit in many cases, the bitfield type differs from the external type,
+it is used only to define the bitfield size and identify the conversions.
 
-type must be an isbits data type. Parameterized data types are allowed. 
+A bitfield type must be an isbits data type. Parameterized data types are allowed. 
 Included is support for all predefined primitive number types up to 32 bit
 sizes, Bool (consuming 1 bit), Enum subtypes (bit size automatically derived),
 and Char.
@@ -634,14 +651,15 @@ and Char.
 For BitStruct-s memory efficiency it is essential, that field definitions
 can restrict the set of instances of a Type R to a small subset, which can 
 be encoded with less bits. For this purpose, special singleton types
-are introduced. Each such singleton type represents an encoding/decoding
+are introduced als bitfield types. 
+Each such singleton type represents an encoding/decoding
 scheme for an instance subset. You can define several types T1, T2 ...
 identifying distinct subrange encodings of a type R.
 
 For Integer subranges, the singleton types BInt{N} and BUInt{N} are defined in 
-BitStructs package. BInt{N} declares an Int subrange of N bits, BUInt{n} an
+BitStructs package. BInt{N} declares an Int subrange of N bits, BUInt{N} an
 UInt subrange. For Characters, the frequently used subranges of ASCII and Latin-1
-characters are supported witn AsciiChar and LatinChar, consuming 7/8 bits in a
+characters are supported with AsciiChar and LatinChar, consuming 7/8 bits in a
 BitStruct.
 
 It is easy to define support for further types and subranges of them
@@ -659,15 +677,23 @@ declared as type T:
     * BitStructs.decode(::Type{T}, x::UInt64)::R. Returns an instance of R
       constructed from a bitfield of bitsizeof(T) bits given in x.
 
-All types must be already defined when @bitstruct is called. 
+All bitfield types must be already defined when @bitstruct is called. 
 
 The sum of bit sizes of all fields must be smaller or equal to 64, because a BitStruct 
-instance is implemented as a 64 bit primitive type.
+instance is implemented as a 64 bit primitive type. Due to "world age" problems,
+this macro cannot check it, but  [`generate`](@ref) does.
 
-Delimiter ';' between two field declarations can be replaced by a newline sequence, closely
-resembling the usual struct syntax.
+You should call [`generate`](@ref) to get good performance. 
 
-The following example just fits into 64 bit. An ordinary struct would consume 19 bytes, 
+To construct Instances, best use the no-args-constructor. Its fast and returns
+a BitStruct with all bits set to 0. Then change field values via [`setproperty`](@ref)
+or use the more concise syntax *aBitstruct /= (aBitfieldSymbol, valueToSet)*
+For convenience, there is a constructor which emulates the default constructor 
+of a struct (parameters are the values to assign to its fields, in declared order),
+**but** it is 1000* slower than the recommended approach, because it needs to 
+allocate temporary structures.
+
+The following example uses 64 bit. An ordinary struct would consume 21 bytes, 
 more than doubling memory consumption. Concerning its runtime performance, have a look at the
 benchmarks supplied as test functions.
 
@@ -675,19 +701,15 @@ benchmarks supplied as test functions.
 julia> @bitstruct MyBitStruct begin
     flag1 :: Bool
     flag2 :: Bool
-    flag3 :: Bool
-    flag4 :: Bool
-    ascii1 :: BUInt{7}
-    ascii2 :: BUInt{7}
-    id1 :: BUInt{9} # 0..511
+    flag3 :: Bool # many flags push memory savings and runtime advantages of a BitStruct
+    flag4 :: Bool # you could always use Bool for a one-bit field, but ...
+    bit1  :: BInt{1} # in a numerical context, BInt/BUInt does the number conversion for you. bit1 can be -1, 0
+    ac :: AsciiChar # if you know a Char is ASCII, encode it in 7 instead of 32 bits
+    lc :: Latin1Char # similar use 8 bits for the Latin-1 character set
+    id1 :: BUInt{10} # 0..1023
     id2 :: BUInt{12} # 0..4095
-    delta1 :: BInt{9} # -256..255
-    delta1 :: BInt{9} # -256..255 
-    flag5 :: Bool
-    flag6 :: Bool
-    flag7 :: Bool
-    flag8 :: Bool
-    status:: BUInt(3) # 0..7
+    delta1 :: BInt{11} # -1024:1023
+    delta2 :: BInt{11} # -1024:1023
 end
 
 ```
@@ -774,9 +796,10 @@ end
 
 
 # required by dump(aBitStructType) w/o overloading. Still necessary??!
-function Base.datatype_fieldtypes(::Type{BitStruct{T}}) where T
-    T.parameters[2].parameters
-end
+# TODO is not correct: bitfield types are not regurned by getproperty
+#function Base.datatype_fieldtypes(::Type{BitStruct{T}}) where T
+#    T.parameters[2].parameters
+#end
 
 # DEBUG version
 macro bs(name,ex)
