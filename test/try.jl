@@ -1,3 +1,33 @@
+asserting() = false #making this a function results in code being invalidated and recompiled when this gets changed
+
+macro mayassert(test)
+  esc(:(if $(@__MODULE__).asserting()
+    @assert($test)
+   end))
+end
+
+f(x) = @mayassert x < 2 
+@code_native f(1)
+f(1)
+
+asserting() = true
+
+@code_native f(2)
+f(2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 using BitStructs
 
 # abstract example
