@@ -39,7 +39,6 @@ for i = 1:vecsize
 end
 
 
-
 prompt("foo flag or: test with || if any flag is set in loop mutable struct/struct/BitStruct/ /=")
 function foo(b::Vector{T}) where T
     s = 0

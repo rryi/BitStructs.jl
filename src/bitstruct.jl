@@ -23,9 +23,6 @@ a NamedTuple Type which leads to an invalid BitStruct.
 primitive type BitStruct{T<:NamedTuple} 64 end
 
 
-Base.fieldnames(::Type{BitStruct{T}}) where T = T.parameters[1]
-Base.propertynames(ps::BitStruct{T}) where T = fieldnames(BitStruct{T})
-
 
 """
 _mask(Int::bits) :: UInt64
@@ -79,21 +76,26 @@ end
 """
     function _fielddescr(::Type{BitStruct{T}},s::Symbol)
 
-extract field descriptor (type,shift,bits) from type info for a symbol S.
-If S is not found, (Nothing,0,0) is returned.
+extract field descriptor tuple (type,shift,bits,index,externalType) 
+from BitStruct type parameters for a symbol S. 
+If s is not found, an ArgumentError is thrown. Explanation:
 
-This function suffers from "new method in old world" problem: any type defined after its first use
-will cause an exception if the type is used in a BitStruct. Besides that, it is ultrafast,
-returning a constant
+ - type the bitfield type given as type in t
+ - shift no. of bits to shift right to move lsb of bitfield to lsb
+   (lsb===least significant bit)
+ - bits number of bits of the bitfield 
+ - index index of s in the symbol tuple of t
+ - externalType the data type returned by *decode(type)*,
+   also called "external type" of a bitfield in the BitStructs doc.
 
-workaround for benchmarking: change this code after defining all types.
-automatic recompile will fix it for that run.
+This function would be an ideal candidate for @generated, 
+if it would not suffer from "new method in old world" problem: 
+any type defined after its first use will cause an exception 
+if the type is used in a BitStruct. 
 
-bitsizeof on Enum uses typemax, seems invokelatest is not recursive wrt world.
-ERROR: LoadError: MethodError: no method matching typemax(::Type{ProcStatus})
-The applicable method may be too new: running in world age 29624, while current world is 29656.
-Closest candidates are: 
-  typemax(::Type{ProcStatus}) at Enums.jl:197 (method too new to be called from this world context.)
+Solution: a call of [`generate`](@ref) compiles it down to return
+constants as inlined code. This also removes unused return parameters
+in native code.
 """
 function _fielddescr end
 
@@ -108,15 +110,52 @@ function _fielddescr(::Type{BitStruct{T}},s::Symbol) where {T<:NamedTuple}
         type = types[idx]
         #bits = Int(Base.invokelatest(bitsizeof,type)) # bitsizeof must be recursively defined with invokelatest!!!
         bits = bitsizeof(type)
+        R = typeof(decode(type, zero(UInt64)))
         if syms[idx]===s
             # @generated: return :(($type,$shift,$bits))
-            return type,shift,bits
+            return type,shift,bits,idx,R
         end
         shift += bits
         idx += 1
     end
     throw(ArgumentError(string(s))) 
 end
+
+
+
+Base.fieldnames(::Type{BitStruct{T}}) where T = T.parameters[1]
+
+Base.propertynames(ps::BitStruct{T}) where T = fieldnames(BitStruct{T})
+
+# fieldname
+Base.fieldname(::Type{BitStruct{T}},i) where T = T.parameters[1][i]
+
+
+"""
+fieldtypes(BitStruct{T}) :: NTuple(N,Datatype)
+
+Return a tuple with the external types of a BitStruct - the
+types of the values returned by getproperty and expected by setproperty. 
+"""
+function Base.fieldtypes(::Type{BitStruct{T}})
+    v = DataType[]
+    syms = T.parameters[1]
+    for s in syms
+        t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
+        push!(v,R)
+    end
+    return tuple(v...)
+end
+
+
+"""
+bitfieldtypes(BitStruct{T}) :: NTuple(N,Datatype)
+
+Return a tuple with the bitfield declarative types of a BitStruct - the
+types used in the NamedTuple which defines a BitStruct. 
+"""
+bitfieldtypes(::Type{BitStruct{T}}) = tuple(T.parameters[2].parameters...)
+
 
 
 # recursive implementation - was for subfield direct access which turned out to have no advantage
@@ -240,8 +279,9 @@ function generate(bsType::DataType)
         type = types[idx]
         bits = bitsizeof(type)
         strsym=string(sym)
+        R = typeof(decode(type, zero(UInt64)))
         ex = :(@inline function _fielddescr(::Type{$bsType}, ::Val{Symbol($strsym)}) 
-        return ($type, $shift, $bits)
+        return ($type, $shift, $bits, $idx, $R)
         end)
         #println("about to compile: ",ex)
         eval(ex) # this compiles the specialized function
@@ -338,7 +378,7 @@ function Base.dump(io::IOContext, x::BitStruct{T}, n::Int, indent) where T <: Na
         for s in syms
             #property
             #println("  ",s, "::",t, " , ",shift," , ",bits)
-            t,shift, bits = _fielddescr(BitStruct{T},s)
+            t,shift, bits,idx, R = _fielddescr(BitStruct{T},s)
             v = getproperty(x,s)
             print(io,indent2,s," [",shift+1,':',shift+bits,"::",t, "]: ")
             Base.dump(io, v,n-1,indent2)
@@ -366,7 +406,7 @@ Copying a field from a BitStruct of the same type is the fastest variant.
 """
 @inline function setproperty(x::BitStruct{T},s::Symbol,v) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
-    t,shift, bits = _fielddescr(BitStruct{T},s)
+    t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
     u = encode(t,v)
     #ret = _set(ret,Val(shift),Val(bits),u)
     ret = _set(ret,shift,bits,u)
@@ -377,7 +417,7 @@ end
 
 # optimized code when copying a field from another BitStruct instance
 @inline function setproperty(x::BitStruct{T},s::Symbol,v::BitStruct{T}) where {T<:NamedTuple}
-    t,shift, bits = _fielddescr(BitStruct{T},s)
+    t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
     mask = _mask(bits) << shift
     u = reinterpret(UInt64,x) & mask
     ret = (reinterpret(UInt64,x) & ~mask) | u
@@ -389,7 +429,7 @@ function setproperty(x::BitStruct{T};kwargs...) where {T<:NamedTuple}
     ret = reinterpret(UInt64,x)
     for p in pairs(kwargs)
         s = p.first
-        t,shift, bits = _fielddescr(BitStruct{T},s)
+        t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
         v = encode(t,p.second)
         #ret = _set(ret,Val(shift),Val(bits),v)
         ret = _set(ret,shift,bits,v)
@@ -420,7 +460,7 @@ end
 
 
 @inline function Base.getproperty(x::BitStruct{T},s::Symbol) where T<:NamedTuple
-    type,shift,bits = _fielddescr(BitStruct{T},s)
+    type,shift,bits, idx, R = _fielddescr(BitStruct{T},s)
     return @inbounds decode(type,_get(reinterpret(UInt64,x),shift,bits))
 end
 
@@ -469,7 +509,7 @@ and all primitive Integer types. It is **NOT ** safe for most Enum types,
 Float16, Float32 and probably user-defined bitfield types.
 """
 @inline function Base.:(+)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    type,shift,bits = _fielddescr(BitStruct{T},fld)
+    type,shift,bits, idx,R = _fielddescr(BitStruct{T},fld)
     return reinterpret(BitStruct{T},reinterpret(UInt64,x)| (_mask(bits) << shift))
 end
 
@@ -506,7 +546,7 @@ For character types, its result is a control character with code 0, it might
 confuse C functions for strings, which rely on zero-terminated strings. 
 """
 @inline function Base.:(-)(x::BitStruct{T},fld::Symbol) where {T<:NamedTuple}
-    type,shift,bits = _fielddescr(BitStruct{T},fld)
+    type,shift,bits, idx, R = _fielddescr(BitStruct{T},fld)
     return reinterpret(BitStruct{T},reinterpret(UInt64,x) & ~(_mask(bits) << shift))
 end
 
@@ -758,7 +798,7 @@ end
 
 function bitsizeof(::Type{BitStruct{T}}) where T
     lastsym = last(T.parameters[1])
-    type,shift,bits = _fielddescr(BitStruct{T},lastsym)
+    type,shift,bits,idx,R = _fielddescr(BitStruct{T},lastsym)
     return shift+bits
 end
 
