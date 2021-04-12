@@ -45,7 +45,7 @@ Wrapping has following reasons:
  
 
 To keep struct small, table resize management is externalized into
-into [`sizesOfBSTable`](@ref).
+into [`trackBSTableResize`](@ref).
 """
 struct BSTable{BitStruct{T<:NamedTuple}} <: AbstractVector{BitStruct{T}}
     rows:: Vector{BitStruct{T}}
@@ -62,15 +62,18 @@ BSTable, used on resize operations of a BSTable and its BSColumn-s.
 If a BSColumn is resized, it is first checked if its row count stored 
 here matches the BSTable row count. Following cases are distingushed:
 
- 1. no entry in sizesOfBSTable: create entry, set all row counts to
-    row count of BSTable. Index in Int32 vector is index of the
+ 1. no entry in trackBSTableResize: create entry, set all row counts to
+    row count of BSTable. Index in Int vector is index of the
     property symbol in the BStruct NamedTuple symbol list.
+    Continue with case 2.
 
  2. row count in dict === row count of BSTable: resize BSTable, update
-    row count in dict to new BSTable row count.
+    row count for this BSColumn in dict to new BSTable row count.
+    This is the expected case for 1st column to be resized.
 
- 3. row count in dict + resize === row count of BSTable: do not resize 
-    BSZable, update  row count in dict to BSTable row count.
+ 3. new length in resize === row count of BSTable: do not resize 
+    BSTable, update  row count in dict to BSTable row count. This is
+    the expected case for all but 1st column to be resized.
 
  4. any other case: throw an ArgumentError.
 
@@ -86,8 +89,11 @@ operations will cause an error.
 Lazy initialization on 1st use (case 1.) ensures that this construction 
 is properly initialized even after a deserialization of a BSTable or
 BSColumn.
+
+key is the BSStruct vector instance (because it must be a heap object), 
+value is the vector of the current sizes of its BSColumn instances
 """
-const sizesOfBSTable = Base.IdDict{DataType,Vector{Int32}}()
+const trackBSTableResize = Base.IdDict{Vector{BSStruct},Vector{Int}}()
 
 """
 A type-stable, fully typed column of a BSTable, to be used in other 
@@ -97,7 +103,7 @@ Encapsulates access to property s in its BSTable.
 Read/write performance is excellent, resize operations have
 some overhead: because a BSColumn is part of a BSTable, a
 resize cannot simply map on a vector resize. See doc on
-[`sizesOfBSTable`](@ref) 
+[`trackBSTableResize`](@ref) 
 """
 struct BSColumn{s,T<:NamedTuple,R} <: AbstractVector{R}
     table :: BSTable{BitStruct{T}}
@@ -224,14 +230,49 @@ end
 
 
 ## BSColumn resizing vector methods
-Base.resize!(bc::BSColumn{s,T,R}, idx=1)  where {s,T,R}
+
+# resize is the central method for any supported resizing
+Base.resize!(bc::BSColumn{s,T,R}, n::Integer)  where {s,T,R}
+    bv = bc.table.rows
+    lengthVec = get(trackBSTableResize,bv,Int[])
+    lengthTable = length(bv) # current row count
+    if length(lengthVec)===0
+        # create entry 
+        syms = fieldnames(bc.table)
+        resize!(lengthVec,length(syms))
+        fill!(lengthVec,length(bv))
+    end
+    t,shift, bits,idx, R = _fielddescr(BitStruct{T},s)
+    if lengthTable == lengthVec[idx]
+        # 1st column to be resized - do it in table!
+        resize!(bv,n)
+    else
+        if n != lengthTable
+            # must not happen: all columns have to be resized to the same table size.
+            throw(ArgumentError("Table is partly resized to $lengthTable, column $s cannot be resized to $n"))
+        end
+    end
+    lengthVec[idx] = n
+    trackBSTableResize[bv] = lengthVec
+end
+
+function Base.push!(bc::BSColumn{s,T,R},v)  where {s,T,R} 
+    n = length(bc) + 1
+    resize!(bc,n)
+    bc[n] = v
+end
+
+function Base.append!(bc::BSColumn{s,T,R},rows)  where {s,T,R} 
+    i = length(bc) 
+    n = i + length(rows)
+    resize!(bc,n)
+    for v in rows
+        i += 1
+        bc[i] = v
+    end
+end
 
 
-
-
-
-Base.push!(BSColumn{s,T,R},v)  where {s,T,R} push!(bt.rows,row,i)
-Base.append!(bt::BSTable{BitStruct{T}}, rows) where T = append!(bt.rows,rows)
-Base.empty!(bt::BSTable{BitStruct{T}}) where T = empty!(bt.rows)
+Base.empty!(bc::BSColumn{s,T,R})  where {s,T,R} = resize!(bc,0)
 
 

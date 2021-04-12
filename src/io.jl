@@ -184,7 +184,7 @@ function writebits(bq::BitQueue, io::IO, bs::BitStruct{T}) where {T<:NamedTuple}
             end
         end
     end
-    @boundscheck bitremainder< (1<<newbitcount) || throw(BoundsError("")
+    @boundscheck bitremainder< (1<<newbitcount) || throw(BoundsError(""))
     return BitQueue(newbitcount%UInt8,bitremainder%UInt8)
 end
     
