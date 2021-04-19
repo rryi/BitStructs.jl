@@ -53,6 +53,110 @@ end
 #const BSTable{BitStruct{T}} = Vector{BitStruct{T}}
 
 
+BSTable(bs::Vector{BitStruct{T}}) where T<:NamedTuple = BSTable{BitStruct{T}}(bs)
+
+## Vector methods for BSTable
+Base.checkbounds(::Type{Bool}, bt::BSTable{BitStruct{T}}, idx) where T = checkbounds(Bool,bt.rows,idx)
+Base.iterate(bt::BSTable{BitStruct{T}},idx=1) where T = idx > length(bt.rows) nothing : (bt.rows[idx],idx+1)
+Base.eltype(BSTable{BitStruct{T}}) where T <:NamedTuple = BitStruct{T}
+Base.length(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
+Base.size(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
+Base.getindex(bt::BSTable{BitStruct{T}} , i) where T = bt.rows[i]
+Base.setindex!(bt::BSTable{BitStruct{T}} , v, i) where T = setindex!(bt.rows,v,i)
+Base.firstindex(bt::BSTable{BitStruct{T}} , v, i) where T = 1
+Base.lastindex(bt::BSTable{BitStruct{T}} , v, i) where T = length(bt.rows)
+
+# go for default
+#function Base.similar(bt::BSTable{BitStruct{T}} , element_type, dims) where T 
+#    element_type != BitStruct{T} && return Array{element_type, dims}
+#end
+
+
+## mutable BSTable methods
+Base.push!(bt::BSTable{BitStruct{T}}, row::BitStruct{T}) where T = push!(bt.rows,row,i)
+Base.append!(bt::BSTable{BitStruct{T}}, rows) where T = append!(bt.rows,rows)
+Base.empty!(bt::BSTable{BitStruct{T}}) where T = empty!(bt.rows)
+
+
+## following code from TypedTables, adopted for BSTable
+
+Tables.istable(::Type{<:BSTable}) = true
+Tables.isrowtable(::Type{<:BSTable}) = true
+Tables.rowaccess(::Type{<:BSTable}) = true
+
+
+#Tables.materializer(::BSTable) = BSTable
+@inline Tables.rows(t::BSTable) = t
+
+
+# we cannot use getfield because it is not redefineable for BitStruct
+@inline function Tables.getcolumn(row::BitStruct{T}, i::Int) where T<:NamedTuple
+    s = T.parameters[1][i]
+    return getProperty(row,s)
+end
+
+function Tables.schema(bt::BSTable{BitStruct{T}}) where T
+    return Schema(fieldnames(BitStruct{T}),fieldtypes(BitStruct{T}))
+end
+
+
+## AbstractVector methods for table
+
+# BSTable column methods
+Tables.columnaccess(::Type{<:BSTable}) = true
+
+# get the column corresponding to a bitstruct field name
+function Base.getproperty(bt::BSTable{BitStruct{T}}, sym::Symbol) where T
+    type,shift,bits, idx, R = _fielddescr(BitStruct{T},sym) # only to check validity
+    return BSColumn{sym,T,R}(bt)
+end
+
+# geh i-th column
+Tables.getcolumn(bt::BSTable{BitStruct{T}}, i) where T = return getproperty(bt,fieldname(bt,i))
+
+
+Tables.columnaccess(::Type{<:BSTable}) = true
+
+"""
+    columns(table::BSTable)
+
+"""
+@inline Tables.columns(bt::BSTable) = bt
+
+
+function Base.setproperty!(t::BSTable, name::Symbol, a)
+    error("BSTable columns are immutable. Set the values of an existing column with the `.=` operator, e.g. `table.name .= array`.")
+end
+
+#?? propertytype(::BSTable) = BSTable
+
+"""
+    columnnames(BSTable)
+
+Return a tuple of the column names of a `BSTable`.
+"""
+columnnames(bt::BSTable{BitStruct{T}}) where T = fieldnames(BitStruct{T})
+
+# show
+#Base.show(io::IO, ::MIME"text/plain", t::BSTable) = showtable(io, t)
+#Base.show(io::IO, t::BSTable) = showtable(io, t)
+
+# Basic AbstractArray interface
+
+@inline Base.size(t::BSTable) = size(t.rows)
+@inline Base.axes(t::BSTable) = axes(t.rows)
+@inline Base.IndexStyle(t::BSTable) = IndexStyle(t.rows)
+
+Base.checkbounds(::Type{Bool}, t::BSTable, i) = checkbounds(Bool,t.rows,i)
+
+
+# Private fields are never exposed since they can conflict with column names
+Base.propertynames(t::BSTable, private::Bool=false) = columnnames(t)
+
+
+## BSColumn AbstractVector implementation
+
+
 """
 BSColumn resize management.
 
@@ -109,106 +213,12 @@ struct BSColumn{s,T<:NamedTuple,R} <: AbstractVector{R}
     table :: BSTable{BitStruct{T}}
 end
 
-## Vector methods for BSTable
-Base.checkbounds(::Type{Bool}, bt::BSTable{BitStruct{T}}, idx) where T = checkbounds(Bool,bt.rows,idx)
-Base.iterate(bt::BSTable{BitStruct{T}},idx=1) where T = idx > length(bt.rows) nothing : (bt.rows[idx],idx+1)
-Base.eltype(BSTable{BitStruct{T}}) where T <:NamedTuple = BitStruct{T}
-Base.length(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
-Base.size(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
-Base.getindex(bt::BSTable{BitStruct{T}} , i) where T = bt.rows[i]
-Base.setindex!(bt::BSTable{BitStruct{T}} , v, i) where T = setindex!(bt.rows,v,i)
-Base.firstindex(bt::BSTable{BitStruct{T}} , v, i) where T = 1
-Base.lastindex(bt::BSTable{BitStruct{T}} , v, i) where T = length(bt.rows)
-
-# go for default
-#function Base.similar(bt::BSTable{BitStruct{T}} , element_type, dims) where T 
-#    element_type != BitStruct{T} && return Array{element_type, dims}
-#end
-
-
-## mutable BSTable methods
-Base.push!(bt::BSTable{BitStruct{T}}, row::BitStruct{T}) where T = push!(bt.rows,row,i)
-Base.append!(bt::BSTable{BitStruct{T}}, rows) where T = append!(bt.rows,rows)
-Base.empty!(bt::BSTable{BitStruct{T}}) where T = empty!(bt.rows)
-
-
-## following code from TypedTables, adopted for BSTable
-
-Tables.istable(::Type{<:BSTable}) = true
-Tables.isrowtable(::Type{<:BSTable}) = true
-Tables.rowaccess(::Type{<:BSTable}) = true
-
-
-#Tables.materializer(::BSTable) = BSTable
-@inline Tables.rows(t::BSTable) = t
-
-
-# we cannot use getfield because it is not redefineable for BitStruct
-@inline function Tables.getcolumn(row::BitStruct{T}, i::Int) where T<:NamedTuple
-    s = T.parameters[1][i]
-    return getProperty(row,s)
-end
-
-function Tables.schema(bt::BSTable{BitStruct{T}}) where T
-    return Schema(fieldnames(BitStruct{T}),fieldtypes(BitStruct{T}))
+function BSColumn(s::Symbol, t::BSTable{BitStruct{T}}) 
+    t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
+    return BSColumn{s,T,R}(t)
 end
 
 
-## AbstractVector methods for table
-
-# BSTable column methods
-Tables.columnaccess(::Type{<:BSTable}) = true
-
-# get the column corresponding to a bitstruct field name
-function Base.getproperty(bt::BSTable{BitStruct{T}}, sym::Symbol) where T
-    type,shift,bits, idx, R = _fielddescr(BitStruct{T},s) # only to check validity
-    return BSColumn{sym,T,R}(bt)
-end
-
-# geh i-th column
-Tables.getcolumn(bt::BSTable{BitStruct{T}}, i) where T = return getproperty(bt,fieldname(bt,i))
-
-
-Tables.columnaccess(::Type{<:BSTable}) = true
-
-"""
-    columns(table::BSTable)
-
-"""
-@inline Tables.columns(bt::BSTable) = bt
-
-
-function Base.setproperty!(t::BSTable, name::Symbol, a)
-    error("BSTable columns are immutable. Set the values of an existing column with the `.=` operator, e.g. `table.name .= array`.")
-end
-
-#?? propertytype(::BSTable) = BSTable
-
-"""
-    columnnames(BSTable)
-
-Return a tuple of the column names of a `BSTable`.
-"""
-columnnames(bt::BSTable{BitStruct{T}}) where T = fieldnames(BitStruct{T})
-
-# show
-#Base.show(io::IO, ::MIME"text/plain", t::BSTable) = showtable(io, t)
-#Base.show(io::IO, t::BSTable) = showtable(io, t)
-
-# Basic AbstractArray interface
-
-@inline Base.size(t::BSTable) = size(t.rows)
-@inline Base.axes(t::BSTable) = axes(t.rows)
-@inline Base.IndexStyle(t::BSTable) = IndexStyle(t.rows)
-
-Base.checkbounds(::Type{Bool}, t::BSTable, i) = checkbounds(Bool,t.rows,i)
-
-
-# Private fields are never exposed since they can conflict with column names
-Base.propertynames(t::BSTable, private::Bool=false) = columnnames(t)
-
-
-## BSColumn AbstractVector implementation
 Base.checkbounds(::Type{Bool}, bc::BSColumn{s,T,R}, idx) where {s,T,R} = checkbounds(Bool,bc.table.rows,idx)
 Base.iterate(bc::BSColumn{s,T,R}, idx=1)  where {s,T,R} = idx > length(bc.table.rows) ? nothing : (bc[idx],idx+1)
 Base.eltype(bc::BSColumn{s,T,R})  where {s,T,R} = R
@@ -232,7 +242,7 @@ end
 ## BSColumn resizing vector methods
 
 # resize is the central method for any supported resizing
-Base.resize!(bc::BSColumn{s,T,R}, n::Integer)  where {s,T,R}
+function Base.resize!(bc::BSColumn{s,T,R}, n::Integer)  where {s,T,R}
     bv = bc.table.rows
     lengthVec = get(trackBSTableResize,bv,Int[])
     lengthTable = length(bv) # current row count
