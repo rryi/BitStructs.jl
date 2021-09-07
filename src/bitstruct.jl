@@ -730,7 +730,7 @@ a BitStruct with all bits set to 0. Then change field values via [`setproperty`]
 or use the more concise syntax *aBitstruct /= (aBitfieldSymbol, valueToSet)*
 For convenience, there is a constructor which emulates the default constructor 
 of a struct (parameters are the values to assign to its fields, in declared order),
-**but** it is 1000* slower than the recommended approach, because it needs to 
+**but** it is about factor 1000 slower than the recommended approach, because it needs to 
 allocate temporary structures.
 
 The following example uses 64 bit. An ordinary struct would consume 21 bytes, 
@@ -751,8 +751,6 @@ julia> @bitstruct MyBitStruct begin
     delta1 :: BInt{11} # -1024:1023
     delta2 :: BInt{11} # -1024:1023
 end
-
-# output
 
 BitStruct{NamedTuple{(:flag1, :flag2, :flag3, :bit1, :ubit1, :ac, :lc, :id1, :id2, :delta1, :delta2), Tuple{Bool, Bool, Bool, BInt{1}, BUInt{1}, AsciiChar, Latin1Char, BUInt{10}, BUInt{12}, BInt{11}, BInt{11}}}}
 ```
@@ -832,7 +830,7 @@ function check(::Type{BitStruct{T}}) where T
     i = 0
     for s in syms
         i += 1
-        shift += bitsizeof(types[i])
+        shift += bitsizeof(types[i]) # throws exception if bitsizeof is undefined for some type
     end
     shift <= 64 || throw(DomainError(BitStruct{T},"Total bitsize is $shift - does not fit into 64 bit"))
 end
