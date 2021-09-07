@@ -53,7 +53,8 @@ end
 #const BSTable{BitStruct{T}} = Vector{BitStruct{T}}
 
 
-BSTable(bs::Vector{BitStruct{T}}) where T<:NamedTuple = BSTable{BitStruct{T}}(bs)
+BSTable(bs::Vector{BitStruct{T}}) where T = BSTable{BitStruct{T}}(bs)
+
 
 ## Vector methods for BSTable
 Base.checkbounds(::Type{Bool}, bt::BSTable{BitStruct{T}}, idx) where T = checkbounds(Bool,bt.rows,idx)
