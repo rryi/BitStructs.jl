@@ -2,7 +2,7 @@
 using Tables
 
 """
-BSTable{BitStruct{T}} is a wrapped vector of BitStruct{T}.
+BSTable{T} is a wrapped vector of BitStruct{T}.
 Methods are defined which make it conforming to a
 rows-based table as specified in Tables.jl.
 
@@ -47,36 +47,37 @@ Wrapping has following reasons:
 To keep struct small, table resize management is externalized into
 into [`trackBSTableResize`](@ref).
 """
-struct BSTable{BitStruct{T<:NamedTuple}} <: AbstractVector{BitStruct{T}}
+struct BSTable{T<:NamedTuple} <: AbstractVector{BitStruct{T}}
     rows:: Vector{BitStruct{T}}
 end
-#const BSTable{BitStruct{T}} = Vector{BitStruct{T}}
+#const BSTable{T} = Vector{BitStruct{T}}
 
 
-BSTable(bs::Vector{BitStruct{T}}) where T = BSTable{BitStruct{T}}(bs)
+BSTable(bs::Vector{BitStruct{T}}) where T = BSTable{T}(bs)
 
 
 ## Vector methods for BSTable
-Base.checkbounds(::Type{Bool}, bt::BSTable{BitStruct{T}}, idx) where T = checkbounds(Bool,bt.rows,idx)
-Base.iterate(bt::BSTable{BitStruct{T}},idx=1) where T = idx > length(bt.rows) nothing : (bt.rows[idx],idx+1)
-Base.eltype(BSTable{BitStruct{T}}) where T <:NamedTuple = BitStruct{T}
-Base.length(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
-Base.size(bt::BSTable{BitStruct{T}}) where T = length(bt.rows)
-Base.getindex(bt::BSTable{BitStruct{T}} , i) where T = bt.rows[i]
-Base.setindex!(bt::BSTable{BitStruct{T}} , v, i) where T = setindex!(bt.rows,v,i)
-Base.firstindex(bt::BSTable{BitStruct{T}} , v, i) where T = 1
-Base.lastindex(bt::BSTable{BitStruct{T}} , v, i) where T = length(bt.rows)
+Base.checkbounds(::Type{Bool}, bt::BSTable{T}, idx) where T = checkbounds(Bool,bt.rows,idx)
+Base.eltype(::BSTable{T}) where T <:NamedTuple = BitStruct{T}
+
+Base.iterate(bt::BSTable{T},idx=1) where T = idx > length(bt.rows) ? nothing : (bt.rows[idx],idx+1)
+Base.length(bt::BSTable{T}) where T = length(bt.rows)
+Base.size(bt::BSTable{T}) where T = length(bt.rows)
+Base.getindex(bt::BSTable{T} , i) where T = bt.rows[i]
+Base.setindex!(bt::BSTable{T} , v, i) where T = setindex!(bt.rows,v,i)
+Base.firstindex(bt::BSTable{T} , v, i) where T = 1
+Base.lastindex(bt::BSTable{T} , v, i) where T = length(bt.rows)
 
 # go for default
-#function Base.similar(bt::BSTable{BitStruct{T}} , element_type, dims) where T 
+#function Base.similar(bt::BSTable{T} , element_type, dims) where T 
 #    element_type != BitStruct{T} && return Array{element_type, dims}
 #end
 
 
 ## mutable BSTable methods
-Base.push!(bt::BSTable{BitStruct{T}}, row::BitStruct{T}) where T = push!(bt.rows,row,i)
-Base.append!(bt::BSTable{BitStruct{T}}, rows) where T = append!(bt.rows,rows)
-Base.empty!(bt::BSTable{BitStruct{T}}) where T = empty!(bt.rows)
+Base.push!(bt::BSTable{T}, row::BitStruct{T}) where T = push!(bt.rows,row,i)
+Base.append!(bt::BSTable{T}, rows) where T = append!(bt.rows,rows)
+Base.empty!(bt::BSTable{T}) where T = empty!(bt.rows)
 
 
 ## following code from TypedTables, adopted for BSTable
@@ -96,7 +97,7 @@ Tables.rowaccess(::Type{<:BSTable}) = true
     return getProperty(row,s)
 end
 
-function Tables.schema(bt::BSTable{BitStruct{T}}) where T
+function Tables.schema(bt::BSTable{T}) where T
     return Schema(fieldnames(BitStruct{T}),fieldtypes(BitStruct{T}))
 end
 
@@ -107,16 +108,15 @@ end
 Tables.columnaccess(::Type{<:BSTable}) = true
 
 # get the column corresponding to a bitstruct field name
-function Base.getproperty(bt::BSTable{BitStruct{T}}, sym::Symbol) where T
+function Base.getproperty(bt::BSTable{T}, sym::Symbol) where T
     type,shift,bits, idx, R = _fielddescr(BitStruct{T},sym) # only to check validity
     return BSColumn{sym,T,R}(bt)
 end
 
 # geh i-th column
-Tables.getcolumn(bt::BSTable{BitStruct{T}}, i) where T = return getproperty(bt,fieldname(bt,i))
+Tables.getcolumn(bt::BSTable{T}, i) where T = return getproperty(bt,fieldname(bt,i))
 
 
-Tables.columnaccess(::Type{<:BSTable}) = true
 
 """
     columns(table::BSTable)
@@ -136,7 +136,7 @@ end
 
 Return a tuple of the column names of a `BSTable`.
 """
-columnnames(bt::BSTable{BitStruct{T}}) where T = fieldnames(BitStruct{T})
+columnnames(bt::BSTable{T}) where T = fieldnames(BitStruct{T})
 
 # show
 #Base.show(io::IO, ::MIME"text/plain", t::BSTable) = showtable(io, t)
@@ -195,10 +195,10 @@ Lazy initialization on 1st use (case 1.) ensures that this construction
 is properly initialized even after a deserialization of a BSTable or
 BSColumn.
 
-key is the BSStruct vector instance (because it must be a heap object), 
+key is the BitStruct vector instance (because it must be a heap object), 
 value is the vector of the current sizes of its BSColumn instances
 """
-const trackBSTableResize = Base.IdDict{Vector{BSStruct},Vector{Int}}()
+const trackBSTableResize = Base.IdDict{Vector{BitStruct},Vector{Int}}()
 
 """
 A type-stable, fully typed column of a BSTable, to be used in other 
@@ -211,10 +211,10 @@ resize cannot simply map on a vector resize. See doc on
 [`trackBSTableResize`](@ref) 
 """
 struct BSColumn{s,T<:NamedTuple,R} <: AbstractVector{R}
-    table :: BSTable{BitStruct{T}}
+    table :: BSTable{T}
 end
 
-function BSColumn(s::Symbol, t::BSTable{BitStruct{T}}) 
+function BSColumn(s::Symbol, t::BSTable{T}) where T
     t,shift, bits, idx, R = _fielddescr(BitStruct{T},s)
     return BSColumn{s,T,R}(t)
 end
@@ -235,7 +235,7 @@ function Base.setindex!(bc::BSColumn{s,T,R},v,i)  where {s,T,R}
 end
 
 # go for default
-#function Base.similar(bt::BSTable{BitStruct{T}} , element_type, dims) where T 
+#function Base.similar(bt::BSTable{T} , element_type, dims) where T 
 #    element_type != BitStruct{T} && return Array{element_type, dims}
 #end
 
@@ -253,7 +253,7 @@ function Base.resize!(bc::BSColumn{s,T,R}, n::Integer)  where {s,T,R}
         resize!(lengthVec,length(syms))
         fill!(lengthVec,length(bv))
     end
-    t,shift, bits,idx, R = _fielddescr(BitStruct{T},s)
+    t,shift, bits,idx, RR = _fielddescr(BitStruct{T},s)
     if lengthTable == lengthVec[idx]
         # 1st column to be resized - do it in table!
         resize!(bv,n)
