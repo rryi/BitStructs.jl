@@ -137,7 +137,7 @@ fieldtypes(BitStruct{T}) :: NTuple(N,Datatype)
 Return a tuple with the external types of a BitStruct - the
 types of the values returned by getproperty and expected by setproperty. 
 """
-function Base.fieldtypes(::Type{BitStruct{T}})
+function Base.fieldtypes(::Type{BitStruct{T}}) where {T<:NamedTuple} 
     v = DataType[]
     syms = T.parameters[1]
     for s in syms
@@ -154,7 +154,7 @@ bitfieldtypes(BitStruct{T}) :: NTuple(N,Datatype)
 Return a tuple with the bitfield declarative types of a BitStruct - the
 types used in the NamedTuple which defines a BitStruct. 
 """
-bitfieldtypes(::Type{BitStruct{T}}) = tuple(T.parameters[2].parameters...)
+bitfieldtypes(::Type{BitStruct{T}}) where {T<:NamedTuple} = tuple(T.parameters[2].parameters...)
 
 
 
