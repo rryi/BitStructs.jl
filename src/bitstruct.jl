@@ -740,10 +740,10 @@ benchmarks supplied as test functions.
 ```jldoctest
 julia> @bitstruct MyBitStruct begin
     flag1 :: Bool
-    flag2 :: Bool
-    flag3 :: Bool # many flags push memory savings and runtime advantages of a BitStruct
-    flag4 :: Bool # you could always use Bool for a one-bit field, but ...
+    flag2 :: Bool # many flags push memory savings and runtime advantages of a BitStruct
+    flag3 :: Bool # you could always use Bool for a one-bit field, but ...
     bit1  :: BInt{1} # in a numerical context, BInt/BUInt does the number conversion for you. bit1 can be -1, 0
+    ubit1  :: BUInt{1} # in a numerical context, BInt/BUInt does the number conversion for you. ubit1 can be 0,1
     ac :: AsciiChar # if you know a Char is ASCII, encode it in 7 instead of 32 bits
     lc :: Latin1Char # similar use 8 bits for the Latin-1 character set
     id1 :: BUInt{10} # 0..1023
@@ -752,6 +752,9 @@ julia> @bitstruct MyBitStruct begin
     delta2 :: BInt{11} # -1024:1023
 end
 
+# output
+
+BitStruct{NamedTuple{(:flag1, :flag2, :flag3, :bit1, :ubit1, :ac, :lc, :id1, :id2, :delta1, :delta2), Tuple{Bool, Bool, Bool, BInt{1}, BUInt{1}, AsciiChar, Latin1Char, BUInt{10}, BUInt{12}, BInt{11}, BInt{11}}}}
 ```
 
 """
