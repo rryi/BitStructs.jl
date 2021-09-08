@@ -5,7 +5,7 @@ task:
   artifacts_cache:
     folder: ~/.julia/artifacts
   env:
-    JULIA_VERSION: 1.6
+    JULIA_VERSION: 1.6.2
     JULIA_VERSION: nightly
   install_script:
     - sh -c "$(fetch https://raw.githubusercontent.com/ararslan/CirrusCI.jl/master/bin/install.sh -o -)"
