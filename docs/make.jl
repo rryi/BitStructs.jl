@@ -1,7 +1,7 @@
 using Documenter
 using BitStructs
 
-push!(LOAD_PATH,"../src/")
+#push!(LOAD_PATH,"../src/")
 makedocs(
     sitename = "BitStructs",
          pages = [
@@ -17,6 +17,5 @@ makedocs(
 # See "Hosting Documentation" and deploydocs() in the Documenter manual
 # for more information.
 deploydocs(
-    repo = "github.com/rryi/BitStructs.jl.git",
-    devbranch = "main"
+    repo = "github.com/rryi/BitStructs.jl.git"
 )
