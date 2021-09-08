@@ -769,27 +769,8 @@ macro bitstruct(name,ex)
     types = [esc(e.args[2]) for e in decls]
     bitstruct = :(BitStruct{NamedTuple{($(vars...),), Tuple{$(types...)}}})
     #println("type is: ",bitstruct) 
-    # so far adopted from @NamedTuples. Now: build fielddescr table
-    #= not necessary because _fielddescr is not optimized.
-    # and not working: loop fails on a type declared after this macro but before macro call: eval(Symbol(t)) returns ERROR: UndefVarError: ProcStatus not defined
-    fieldsyms = Symbol[]
-    fielddscrs = Tuple{DataType,Int,Int}[] # type, shift, bits
-    shift = 0
-    for e in decls 
-        #println("sym = ",e.args[1], "type = ", e.args[2], " typeof=",typeof(e.args[2]))
-        t = e.args[2] # type
-        println("t = ",t)
-        t = eval(Symbol(t))
-        println("eval(t) = ",dump(t))
-        bits = bitsizeof(t)
-        push!(fieldsyms,e.args[1])
-        push!(fielddscrs,(t,shift,bits))
-        shift += bits
-        #println("shift=",shift)
-        shift > 64 && throw(DomainError(e.args[1],"BitStruct too huge: would exceed a total bitsize of 64"))
-    end
-    =#
-    # build the expressions to execute
+    # so far adopted from @NamedTuples.
+    # finally give it a type name 
     ret = quote
         const $(esc(name)) = $(bitstruct)
     end
