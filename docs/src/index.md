@@ -1,12 +1,3 @@
-```@meta
-CurrentModule = BitStructs
-```
+# BitStructs.jl
 
-# BitStructs
-
-```@index
-```
-
-```@autodocs
-Modules = [BitStructs]
-```
+Documentation for BitStructs.jl

@@ -1,23 +1,22 @@
-using BitStructs
 using Documenter
+using BitStructs
 
-DocMeta.setdocmeta!(BitStructs, :DocTestSetup, :(using BitStructs); recursive=true)
-
-makedocs(;
-    modules=[BitStructs],
-    authors="Robert Rudolph",
-    repo="https://github.com/rryi/BitStructs.jl/blob/{commit}{path}#{line}",
-    sitename="BitStructs.jl",
-    format=Documenter.HTML(;
-        prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://rryi.github.io/BitStructs.jl",
-        assets=String[],
-    ),
-    pages=[
-        "Home" => "index.md",
-    ],
+push!(LOAD_PATH,"../src/")
+makedocs(
+    sitename = "BitStructs",
+         pages = [
+            "Index" => "index.md",
+            "Tutorial" => "tutorial.md",
+            "Benchmarks" => "benchmarks.md",
+         ],
+    format = Documenter.HTML(),
+    modules = [BitStructs]
 )
 
-deploydocs(;
-    repo="github.com/rryi/BitStructs.jl",
+# Documenter can also automatically deploy documentation to gh-pages.
+# See "Hosting Documentation" and deploydocs() in the Documenter manual
+# for more information.
+deploydocs(
+    repo = "github.com/rryi/BitStructs.jl.git",
+    devbranch = "main"
 )
