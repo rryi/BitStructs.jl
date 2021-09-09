@@ -737,7 +737,7 @@ The following example uses 64 bit. An ordinary struct would consume 21 bytes,
 more than doubling memory consumption. Concerning its runtime performance, have a look at the
 benchmarks supplied as test functions.
 
-```jldoctest
+` ` `jldoctest
 julia> @bitstruct MyBitStruct begin
     flag1 :: Bool
     flag2 :: Bool # many flags push memory savings and runtime advantages of a BitStruct
@@ -753,7 +753,7 @@ julia> @bitstruct MyBitStruct begin
 end
 
 BitStruct{NamedTuple{(:flag1, :flag2, :flag3, :bit1, :ubit1, :ac, :lc, :id1, :id2, :delta1, :delta2), Tuple{Bool, Bool, Bool, BInt{1}, BUInt{1}, AsciiChar, Latin1Char, BUInt{10}, BUInt{12}, BInt{11}, BInt{11}}}}
-```
+` ` `
 
 """
 macro bitstruct(name,ex)

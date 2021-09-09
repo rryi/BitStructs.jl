@@ -2,7 +2,7 @@
 # test Tables.jl functionality
 
 
-function testTable()
+function testTables()
     bav = BSArg[]
     bf = BFlags(true,false,true)
     ba1 = BSArg(bf,S_DONE,7%UInt64,-7)
@@ -54,3 +54,10 @@ function testTable()
     @test bs1 == bs1again
     @test bs1 === bs1again
 end
+
+#=
+@testset "BitStruct table functions" begin
+    testTables()
+
+end
+=#
